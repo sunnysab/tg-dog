@@ -44,6 +44,7 @@ app = typer.Typer()
 
 ```
 tg-dog plugin echo -- foo bar
+tg-dog plugin echo foo bar
 ```
 
 ## 定时任务示例
