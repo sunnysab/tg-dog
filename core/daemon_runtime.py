@@ -5,6 +5,7 @@ from core.client_manager import ClientManager, safe_disconnect
 from core.config import resolve_profile
 from core.executor import ActionError, execute_action
 from core.ipc import start_server
+from core.plugins import PluginError, run_plugin_setup
 from core.scheduler import build_scheduler
 
 
@@ -83,6 +84,37 @@ async def run_daemon(
 ) -> None:
     pool = ClientPool(config, session_dir, logger)
 
+    async def _setup_listeners():
+        listeners = config.get("listeners") or []
+        for index, listener in enumerate(listeners, start=1):
+            plugin_name = listener.get("plugin") or listener.get("name")
+            if not plugin_name:
+                logger.error("Listener %s missing plugin name", index)
+                continue
+            profile_name = listener.get("profile")
+            args = listener.get("args") or []
+            if isinstance(args, str):
+                args = [args]
+            try:
+                manager, profile_key, profile, _ = await pool._ensure_client(profile_name)
+                await run_plugin_setup(
+                    plugin_name,
+                    {
+                        "config": config,
+                        "profile_name": profile_key,
+                        "profile": profile,
+                        "client": manager.client,
+                        "logger": logger,
+                        "session_dir": session_dir,
+                    },
+                    list(args),
+                    logger,
+                )
+            except (PluginError, DaemonError) as exc:
+                logger.error("Listener %s failed: %s", index, exc)
+            except Exception as exc:
+                logger.exception("Listener %s failed: %s", index, exc)
+
     async def _handle(request: Dict[str, Any]) -> Dict[str, Any]:
         action = request.get("action")
         if action == "ping":
@@ -104,6 +136,7 @@ async def run_daemon(
             return {"ok": False, "error": str(exc)}
 
     scheduler = build_scheduler(config, logger, pool=pool)
+    await _setup_listeners()
     server = await start_server(socket_path, _handle, logger)
 
     stop_event = asyncio.Event()

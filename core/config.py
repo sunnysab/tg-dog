@@ -18,6 +18,8 @@ def load_config(path: str = "config.yaml") -> Dict[str, Any]:
         raise ConfigError("Config must contain a non-empty 'profiles' mapping")
     if "tasks" in data and data["tasks"] is not None and not isinstance(data["tasks"], list):
         raise ConfigError("'tasks' must be a list if provided")
+    if "listeners" in data and data["listeners"] is not None and not isinstance(data["listeners"], list):
+        raise ConfigError("'listeners' must be a list if provided")
     if "api_id" in data and data["api_id"] is None:
         raise ConfigError("'api_id' cannot be null if provided")
     if "api_hash" in data and data["api_hash"] is None:

@@ -66,6 +66,10 @@ def _get_plugin_runner(module):
     return getattr(module, "run", None) or getattr(module, "main", None)
 
 
+def _get_plugin_setup(module):
+    return getattr(module, "setup", None)
+
+
 def _call_helper(loop: Optional[asyncio.AbstractEventLoop]):
     def _call(coro):
         if loop is None:
@@ -83,6 +87,17 @@ async def run_plugin_code(name: str, context: Dict[str, Any], args: List[str], l
         raise PluginError("Plugin must define run(context, args) or main(context, args)")
 
     result = runner(context, args)
+    if hasattr(result, "__await__"):
+        return await result
+    return result
+
+
+async def run_plugin_setup(name: str, context: Dict[str, Any], args: List[str], logger) -> Any:
+    module = load_plugin(name)
+    setup = _get_plugin_setup(module)
+    if setup is None:
+        raise PluginError("Plugin must define setup(context, args) for listeners")
+    result = setup(context, args)
     if hasattr(result, "__await__"):
         return await result
     return result

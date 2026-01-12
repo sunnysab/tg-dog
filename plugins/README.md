@@ -26,6 +26,13 @@ import typer
 app = typer.Typer()
 ```
 
+监听类插件可以实现：
+
+```python
+async def setup(context, args):
+    ...
+```
+
 ### context 结构
 
 - `config`: 解析后的配置字典
@@ -59,4 +66,13 @@ tasks:
       plugin: "echo"
       args: ["foo", "bar"]
       # mode: cli  # 可选：用 Typer 子命令方式执行
+```
+
+## listeners 配置示例（daemon）
+
+```yaml
+listeners:
+  - profile: work_account
+    plugin: "webhook_listener"
+    args: ["--target", "-1001234567890", "--url", "https://example.com/webhook"]
 ```

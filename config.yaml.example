@@ -22,3 +22,11 @@ tasks:
     limit: 5
     max_size: 5242880
     output_dir: downloads
+listeners:
+- profile: work_account
+  plugin: webhook_listener
+  args:
+  - --target
+  - -1001234567890
+  - --url
+  - https://example.com/webhook

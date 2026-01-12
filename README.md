@@ -125,6 +125,29 @@ python main.py daemon --config config.yaml --log-file logs/daemon.log
 > 默认情况下，`run/list/plugin` 会优先尝试连接正在运行的 daemon，复用已登录账号。  
 > 如果不想使用 daemon，可加 `--no-daemon`。
 
+## daemon 监听与随机任务示例
+
+```yaml
+tasks:
+  - profile: work_account
+    trigger_time: "*/5 * * * *"
+    action_type: plugin
+    payload:
+      plugin: "random_daily_sender"
+      args: ["--target", "7672228046", "--text", "/sign", "--window", "09:00-23:00", "--min-interval-hours", "24", "--state", "data/sign.json"]
+  - profile: work_account
+    trigger_time: "*/5 * * * *"
+    action_type: plugin
+    payload:
+      plugin: "random_daily_sender"
+      args: ["--target", "5778226799", "--text", "/checkin", "--window", "09:00-23:00", "--min-interval-hours", "24", "--state", "data/checkin.json"]
+
+listeners:
+  - profile: work_account
+    plugin: "webhook_listener"
+    args: ["--target", "-1001472283197", "--url", "https://example.com/webhook"]
+```
+
 ## 插件机制
 
 - 插件放在 `plugins/<name>/plugin.py`
