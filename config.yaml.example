@@ -11,12 +11,14 @@ tasks:
   trigger_time: '*/5 * * * *'
   action_type: send_msg
   target: '@channel_or_user'
+  enabled: true
   payload:
     text: Scheduled hello
 - profile: personal
   trigger_time: 0 * * * *
   action_type: download
   target: '@chat'
+  enabled: true
   payload:
     media_type: photo
     limit: 5
@@ -25,6 +27,7 @@ tasks:
 listeners:
 - profile: work_account
   plugin: webhook_listener
+  enabled: true
   args:
   - --target
   - -1001234567890

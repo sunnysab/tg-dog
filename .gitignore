@@ -5,8 +5,10 @@ __pycache__/
 *.pyd
 *.session
 config.yaml
+data/
 sessions/
 logs/
 downloads/
 .env
 .DS_Store
+.idea/

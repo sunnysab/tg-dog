@@ -23,6 +23,9 @@ action_map = {
 
 
 async def _run_task(task: Dict[str, Any], config: Dict[str, Any], logger, pool=None) -> None:
+    if task.get("enabled") is False:
+        logger.info("Task disabled; skipping")
+        return
     profile_name = task.get("profile")
     action_type = task.get("action_type")
     if action_type not in action_map:

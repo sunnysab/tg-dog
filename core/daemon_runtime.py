@@ -87,6 +87,9 @@ async def run_daemon(
     async def _setup_listeners():
         listeners = config.get("listeners") or []
         for index, listener in enumerate(listeners, start=1):
+            if listener.get("enabled") is False:
+                logger.info("Listener %s disabled; skipping", index)
+                continue
             plugin_name = listener.get("plugin") or listener.get("name")
             if not plugin_name:
                 logger.error("Listener %s missing plugin name", index)

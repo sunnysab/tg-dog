@@ -44,7 +44,7 @@ def _collect_buttons(message):
     for row_index, row in enumerate(message.buttons):
         for col_index, btn in enumerate(row):
             text = getattr(btn, "text", "")
-            buttons.append({"text": text, "row": row_index, "col": col_index})
+            buttons.append({"text": text, "i": row_index, "j": col_index})
     return buttons
 
 
@@ -135,7 +135,7 @@ async def _search_and_download(
                 next_btn = _find_next_button(buttons)
                 if next_btn and page < max_pages:
                     await _call_with_floodwait(
-                        lambda: response.click(row=next_btn["row"], col=next_btn["col"]),
+                        lambda: response.click(i=next_btn["i"], j=next_btn["j"]),
                         logger,
                     )
                     response = await _call_with_floodwait(lambda: conv.get_response(timeout=timeout), logger)
@@ -157,7 +157,7 @@ async def _search_and_download(
 
             if selected:
                 await _call_with_floodwait(
-                    lambda: response.click(row=selected["row"], col=selected["col"]),
+                    lambda: response.click(i=selected["i"], j=selected["j"]),
                     logger,
                 )
                 break
@@ -166,7 +166,7 @@ async def _search_and_download(
             if not next_btn or page >= max_pages:
                 raise RuntimeError("No matching candidate found")
             await _call_with_floodwait(
-                lambda: response.click(row=next_btn["row"], col=next_btn["col"]),
+                lambda: response.click(i=next_btn["i"], j=next_btn["j"]),
                 logger,
             )
             response = await _call_with_floodwait(lambda: conv.get_response(timeout=timeout), logger)

@@ -157,6 +157,14 @@ listeners:
 - 插件 CLI 中如需调用异步 Telethon，请使用 `context["call"](coro)` 执行协程
 - 业务插件模板见 `plugins/business_template`
 
+### 插件启用/禁用
+
+```
+tg-dog plugin enable random_daily_sender
+tg-dog plugin disable random_daily_sender
+tg-dog plugin status
+```
+
 运行插件示例：
 
 ```

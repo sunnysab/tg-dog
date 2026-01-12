@@ -11,7 +11,14 @@ from core.config import ConfigError, load_config, resolve_profile
 from core.daemon_runtime import run_daemon
 from core.executor import ActionError, execute_action
 from core.ipc import IpcError, send_request
-from core.plugins import PluginError, list_plugins, run_plugin_cli
+from core.plugins import (
+    PluginError,
+    is_plugin_enabled,
+    list_plugin_states,
+    list_plugins,
+    run_plugin_cli,
+    set_plugin_enabled,
+)
 
 app = typer.Typer(help="Telegram userbot CLI (Telethon + APScheduler)")
 
@@ -502,6 +509,26 @@ def plugin_cmd(
 ):
     """Run a plugin with raw arguments."""
     logger = _setup_logger()
+    if name in {"enable", "disable", "status", "list"}:
+        if name == "list":
+            for item in list_plugins():
+                status = "enabled" if is_plugin_enabled(item) else "disabled"
+                typer.echo(f"{item}\t{status}")
+            return
+        if name == "status":
+            states = list_plugin_states()
+            for item in list_plugins():
+                status = "enabled" if states.get(item, True) else "disabled"
+                typer.echo(f"{item}\t{status}")
+            return
+        if not ctx.args:
+            typer.echo("Plugin name required", err=True)
+            raise typer.Exit(code=1)
+        target_name = ctx.args[0]
+        enabled = name == "enable"
+        set_plugin_enabled(target_name, enabled)
+        typer.echo(f"{target_name}\t{'enabled' if enabled else 'disabled'}")
+        return
     try:
         cfg = load_config(config)
         profile_key, profile_data = resolve_profile(cfg, profile)

@@ -1,5 +1,6 @@
 import asyncio
 import importlib.util
+import json
 import pathlib
 from typing import Any, Dict, List, Optional
 
@@ -17,6 +18,44 @@ def _project_root() -> pathlib.Path:
 
 def plugin_root() -> pathlib.Path:
     return _project_root() / "plugins"
+
+
+def plugin_state_path() -> pathlib.Path:
+    return _project_root() / "data" / "plugins.json"
+
+
+def load_plugin_state(path: Optional[pathlib.Path] = None) -> Dict[str, Any]:
+    state_path = path or plugin_state_path()
+    if not state_path.exists():
+        return {"plugins": {}}
+    with state_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    if "plugins" not in data or not isinstance(data["plugins"], dict):
+        return {"plugins": {}}
+    return data
+
+
+def save_plugin_state(state: Dict[str, Any], path: Optional[pathlib.Path] = None) -> None:
+    state_path = path or plugin_state_path()
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    with state_path.open("w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+def is_plugin_enabled(name: str, path: Optional[pathlib.Path] = None) -> bool:
+    state = load_plugin_state(path)
+    return state.get("plugins", {}).get(name, True)
+
+
+def set_plugin_enabled(name: str, enabled: bool, path: Optional[pathlib.Path] = None) -> None:
+    state = load_plugin_state(path)
+    state.setdefault("plugins", {})[name] = bool(enabled)
+    save_plugin_state(state, path)
+
+
+def list_plugin_states(path: Optional[pathlib.Path] = None) -> Dict[str, bool]:
+    state = load_plugin_state(path)
+    return {key: bool(value) for key, value in state.get("plugins", {}).items()}
 
 
 def list_plugins() -> List[str]:
@@ -81,6 +120,8 @@ def _call_helper(loop: Optional[asyncio.AbstractEventLoop]):
 
 
 async def run_plugin_code(name: str, context: Dict[str, Any], args: List[str], logger) -> Any:
+    if not is_plugin_enabled(name):
+        raise PluginError(f"Plugin '{name}' is disabled")
     module = load_plugin(name)
     runner = _get_plugin_runner(module)
     if runner is None:
@@ -93,6 +134,8 @@ async def run_plugin_code(name: str, context: Dict[str, Any], args: List[str], l
 
 
 async def run_plugin_setup(name: str, context: Dict[str, Any], args: List[str], logger) -> Any:
+    if not is_plugin_enabled(name):
+        raise PluginError(f"Plugin '{name}' is disabled")
     module = load_plugin(name)
     setup = _get_plugin_setup(module)
     if setup is None:
@@ -110,6 +153,8 @@ async def run_plugin_cli(
     logger,
     loop: Optional[asyncio.AbstractEventLoop] = None,
 ) -> Any:
+    if not is_plugin_enabled(name):
+        raise PluginError(f"Plugin '{name}' is disabled")
     module = load_plugin(name)
     app = _get_plugin_app(module)
     if app is None:
