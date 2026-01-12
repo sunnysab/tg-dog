@@ -9,6 +9,11 @@ from telethon.errors import FloodWaitError
 app = typer.Typer(help="搜索 VmomoVBot 并下载歌曲")
 
 
+@app.callback()
+def _callback():
+    return None
+
+
 def _parse_args(args: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--query", required=True)
@@ -17,6 +22,8 @@ def _parse_args(args: list[str]) -> argparse.Namespace:
     parser.add_argument("--keyword")
     parser.add_argument("--timeout", type=int, default=15)
     parser.add_argument("--max-wait", type=int, default=5)
+    parser.add_argument("--max-pages", type=int, default=5)
+    parser.add_argument("--list-only", action="store_true")
     parser.add_argument("--output", default="downloads/vmomo")
     parser.add_argument("--filename")
     return parser.parse_args(args)
@@ -53,6 +60,15 @@ def _select_button(buttons: list[dict], choice: int, keyword: str | None):
     return buttons[index]
 
 
+def _find_next_button(buttons: list[dict]):
+    keywords = ("下一页", "下页", "next", "more", ">", "»", "→", "➡")
+    for btn in buttons:
+        text = (btn.get("text") or "").strip().lower()
+        if any(key in text for key in keywords):
+            return btn
+    return None
+
+
 def _guess_filename(message, override: str | None) -> str:
     if override:
         return override
@@ -84,6 +100,8 @@ async def _search_and_download(
     keyword: str | None,
     timeout: int,
     max_wait: int,
+    max_pages: int,
+    list_only: bool,
     output: str,
     filename: str | None,
 ):
@@ -98,19 +116,60 @@ async def _search_and_download(
         await _call_with_floodwait(lambda: conv.send_message(query), logger)
         response = await _call_with_floodwait(lambda: conv.get_response(timeout=timeout), logger)
 
-        buttons = _collect_buttons(response)
-        if not buttons:
-            raise RuntimeError("No candidates returned from bot")
-        for index, btn in enumerate(buttons, start=1):
-            logger.info("[%s] %s", index, btn.get("text"))
+        page = 1
+        remaining_choice = max(choice, 1)
+        all_candidates = []
 
-        selected = _select_button(buttons, choice, keyword)
-        if not selected:
-            raise RuntimeError("No button selected")
-        await _call_with_floodwait(
-            lambda: response.click(row=selected["row"], col=selected["col"]),
-            logger,
-        )
+        while True:
+            buttons = _collect_buttons(response)
+            if not buttons:
+                raise RuntimeError("No candidates returned from bot")
+            for btn in buttons:
+                all_candidates.append(btn)
+            logger.info("Page %s candidates:", page)
+            for index, btn in enumerate(buttons, start=1):
+                logger.info("  [%s] %s", index, btn.get("text"))
+
+            if list_only:
+                next_btn = _find_next_button(buttons)
+                if next_btn and page < max_pages:
+                    await _call_with_floodwait(
+                        lambda: response.click(row=next_btn["row"], col=next_btn["col"]),
+                        logger,
+                    )
+                    response = await _call_with_floodwait(lambda: conv.get_response(timeout=timeout), logger)
+                    page += 1
+                    continue
+                return {"candidates": [btn.get("text") for btn in all_candidates]}
+
+            selected = None
+            if keyword:
+                for btn in buttons:
+                    if keyword in (btn.get("text") or ""):
+                        selected = btn
+                        break
+            else:
+                if remaining_choice <= len(buttons):
+                    selected = buttons[remaining_choice - 1]
+                else:
+                    remaining_choice -= len(buttons)
+
+            if selected:
+                await _call_with_floodwait(
+                    lambda: response.click(row=selected["row"], col=selected["col"]),
+                    logger,
+                )
+                break
+
+            next_btn = _find_next_button(buttons)
+            if not next_btn or page >= max_pages:
+                raise RuntimeError("No matching candidate found")
+            await _call_with_floodwait(
+                lambda: response.click(row=next_btn["row"], col=next_btn["col"]),
+                logger,
+            )
+            response = await _call_with_floodwait(lambda: conv.get_response(timeout=timeout), logger)
+            page += 1
 
         media_message = None
         for _ in range(max_wait):
@@ -138,6 +197,8 @@ async def run(context, args):
         keyword=options.keyword,
         timeout=options.timeout,
         max_wait=options.max_wait,
+        max_pages=options.max_pages,
+        list_only=options.list_only,
         output=options.output,
         filename=options.filename,
     )
@@ -151,6 +212,8 @@ def search(
     keyword: str = typer.Option(None, "--keyword"),
     timeout: int = typer.Option(15, "--timeout"),
     max_wait: int = typer.Option(5, "--max-wait"),
+    max_pages: int = typer.Option(5, "--max-pages"),
+    list_only: bool = typer.Option(False, "--list-only"),
     output: str = typer.Option("downloads/vmomo", "--output"),
     filename: str = typer.Option(None, "--filename"),
 ):
@@ -168,6 +231,8 @@ def search(
             keyword=keyword,
             timeout=timeout,
             max_wait=max_wait,
+            max_pages=max_pages,
+            list_only=list_only,
             output=output,
             filename=filename,
         )
