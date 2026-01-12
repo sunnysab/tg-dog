@@ -93,6 +93,13 @@ python main.py run --action download --target @chat --limit 5 --media-type photo
 python main.py list-msgs --target @channel --limit 10
 ```
 
+如果是私有群组/频道，建议先用 `list-dialogs` 获取 `target`：
+
+```
+tg-dog list-dialogs --limit 50
+```
+输出里会包含 `target=-100xxxxxxxxxx` 的可直接使用值。
+
 6) 守护进程模式（定时任务）
 
 ```

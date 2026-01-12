@@ -80,6 +80,20 @@ async def _iter_messages_with_floodwait(client, target: str, logger, **kwargs) -
             yield message
 
 
+async def _iter_dialogs_with_floodwait(client, logger, limit: int) -> AsyncIterator:
+    iterator = client.iter_dialogs(limit=limit)
+    while True:
+        try:
+            dialog = await iterator.__anext__()
+        except StopAsyncIteration:
+            break
+        except FloodWaitError as exc:
+            await _sleep_on_floodwait(exc, logger)
+            continue
+        else:
+            yield dialog
+
+
 async def list_messages(client, target: str, limit: int, logger):
     results = []
     async for message in _iter_messages_with_floodwait(client, target, logger, limit=limit):
@@ -92,6 +106,45 @@ async def list_messages(client, target: str, limit: int, logger):
                 "date": message.date.isoformat() if message.date else None,
                 "sender_id": message.sender_id,
                 "snippet": snippet,
+            }
+        )
+    return results
+
+
+def _dialog_kind(entity) -> str:
+    name = entity.__class__.__name__.lower()
+    if getattr(entity, "bot", False):
+        return "bot"
+    if getattr(entity, "broadcast", False):
+        return "channel"
+    if getattr(entity, "megagroup", False) or name == "chat":
+        return "group"
+    if name == "user":
+        return "user"
+    return name
+
+
+def _dialog_target(entity) -> str | None:
+    entity_id = getattr(entity, "id", None)
+    if entity_id is None:
+        return None
+    is_channel = bool(getattr(entity, "broadcast", False) or getattr(entity, "megagroup", False))
+    if is_channel:
+        return f"-100{entity_id}"
+    return str(entity_id)
+
+
+async def list_dialogs(client, limit: int, logger):
+    results = []
+    async for dialog in _iter_dialogs_with_floodwait(client, logger, limit=limit):
+        entity = dialog.entity
+        results.append(
+            {
+                "id": getattr(entity, "id", None),
+                "name": dialog.name,
+                "username": getattr(entity, "username", None),
+                "kind": _dialog_kind(entity),
+                "target": _dialog_target(entity),
             }
         )
     return results

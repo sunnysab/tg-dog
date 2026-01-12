@@ -1,7 +1,7 @@
 import json
 from typing import Any, Dict, List, Optional
 
-from core.actions import download_media, interactive_send, list_messages, send_message
+from core.actions import download_media, interactive_send, list_dialogs, list_messages, send_message
 from core.plugins import run_plugin_cli, run_plugin_code
 
 
@@ -69,6 +69,9 @@ async def execute_action(
             raise ActionError("Missing target")
         messages = await list_messages(client, target, int(payload.get("limit", 10)), logger)
         return {"messages": messages}
+    if action_type in {"list_dialogs", "dialogs"}:
+        dialogs = await list_dialogs(client, int(payload.get("limit", 30)), logger)
+        return {"dialogs": dialogs}
     if action_type in {"plugin", "plugin_cli"}:
         plugin_name = payload.get("plugin") or payload.get("name")
         if not plugin_name:

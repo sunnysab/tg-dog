@@ -58,6 +58,17 @@ def _try_daemon_request(socket_path: str, request: dict, logger):
         return None
 
 
+def _print_dialog_item(item: dict) -> None:
+    name = item.get("name") or ""
+    username = item.get("username") or ""
+    if username:
+        username = f"@{username}"
+    kind = item.get("kind") or ""
+    target = item.get("target") or ""
+    dialog_id = item.get("id")
+    typer.echo(f"[{kind}] {name} {username} id={dialog_id} target={target}")
+
+
 async def _with_client(profile_key: str, profile: dict, session_dir: str, interactive: bool, logger):
     manager = ClientManager(
         api_id=int(profile["api_id"]),
@@ -457,6 +468,72 @@ def list_plugins_cmd():
     """List available plugins."""
     for name in list_plugins():
         typer.echo(name)
+
+
+@app.command(name="list-dialogs")
+def list_dialogs_cmd(
+    limit: int = typer.Option(30, "--limit", help="Number of dialogs"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Profile name in config"),
+    config: str = typer.Option("config.yaml", "--config", help="Path to config.yaml"),
+    session_dir: str = typer.Option("sessions", "--session-dir", help="Session storage dir"),
+    no_daemon: bool = typer.Option(False, "--no-daemon", help="Do not use daemon if running"),
+):
+    """List dialogs with target hints."""
+    logger = _setup_logger()
+    try:
+        cfg = load_config(config)
+        profile_key, profile_data = resolve_profile(cfg, profile)
+    except ConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    if not no_daemon:
+        response = _try_daemon_request(
+            _daemon_socket(cfg),
+            {
+                "action": "list_dialogs",
+                "profile": profile,
+                "payload": {"limit": limit},
+            },
+            logger,
+        )
+        if response is not None:
+            if not response.get("ok"):
+                typer.echo(response.get("error", "Daemon request failed"), err=True)
+                raise typer.Exit(code=1)
+            result = response.get("result") or {}
+            for item in result.get("dialogs") or []:
+                _print_dialog_item(item)
+            return
+
+    async def _run():
+        manager = await _with_client(profile_key, profile_data, session_dir, False, logger)
+        try:
+            result = await execute_action(
+                "list_dialogs",
+                manager.client,
+                None,
+                {"limit": limit},
+                cfg,
+                profile_key,
+                profile_data,
+                logger,
+                loop=asyncio.get_running_loop(),
+                session_dir=session_dir,
+            )
+            for item in result.get("dialogs") or []:
+                _print_dialog_item(item)
+        finally:
+            await safe_disconnect(manager)
+
+    try:
+        asyncio.run(_run())
+    except ActionError as exc:
+        logger.error("List dialogs failed: %s", exc)
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        logger.exception("List dialogs failed: %s", exc)
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

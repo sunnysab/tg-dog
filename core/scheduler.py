@@ -9,7 +9,16 @@ from core.config import resolve_profile
 from core.executor import ActionError, execute_action
 
 
-action_map = {"send_msg", "send", "interactive_send", "download", "list", "plugin", "plugin_cli"}
+action_map = {
+    "send_msg",
+    "send",
+    "interactive_send",
+    "download",
+    "list",
+    "list_dialogs",
+    "plugin",
+    "plugin_cli",
+}
 
 
 async def _run_task(task: Dict[str, Any], config: Dict[str, Any], logger, pool=None) -> None:
