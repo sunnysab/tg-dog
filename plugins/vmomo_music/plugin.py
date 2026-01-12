@@ -93,6 +93,13 @@ async def _call_with_floodwait(coro_factory, logger):
             await asyncio.sleep(wait_seconds)
 
 
+async def _mark_read(client, target, message, logger):
+    await _call_with_floodwait(
+        lambda: client.send_read_acknowledge(target, message=message),
+        logger,
+    )
+
+
 async def _search_and_download(
     context,
     query: str,
@@ -116,6 +123,7 @@ async def _search_and_download(
     async with client.conversation(target_entity, timeout=timeout) as conv:
         await _call_with_floodwait(lambda: conv.send_message(query), logger)
         response = await _call_with_floodwait(lambda: conv.get_response(timeout=timeout), logger)
+        await _mark_read(client, target_entity, response, logger)
 
         page = 1
         remaining_choice = max(choice, 1)
@@ -139,6 +147,7 @@ async def _search_and_download(
                         logger,
                     )
                     response = await _call_with_floodwait(lambda: conv.get_response(timeout=timeout), logger)
+                    await _mark_read(client, target_entity, response, logger)
                     page += 1
                     continue
                 return {"candidates": [btn.get("text") for btn in all_candidates]}
@@ -170,11 +179,13 @@ async def _search_and_download(
                 logger,
             )
             response = await _call_with_floodwait(lambda: conv.get_response(timeout=timeout), logger)
+            await _mark_read(client, target_entity, response, logger)
             page += 1
 
         media_message = None
         for _ in range(max_wait):
             message = await _call_with_floodwait(lambda: conv.get_response(timeout=timeout), logger)
+            await _mark_read(client, target_entity, message, logger)
             if message.media or message.file:
                 media_message = message
                 break

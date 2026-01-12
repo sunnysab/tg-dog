@@ -151,6 +151,13 @@ async def _send_with_floodwait(coro_factory, logger):
             await asyncio.sleep(wait_seconds)
 
 
+async def _mark_read(client, target, message, logger):
+    await _send_with_floodwait(
+        lambda: client.send_read_acknowledge(target, message=message),
+        logger,
+    )
+
+
 async def _get_response_with_floodwait(conv, timeout: int, logger):
     while True:
         try:
@@ -169,6 +176,7 @@ async def _send_and_expect(client, target, text, expect_text, expect_keyword, ti
         async with client.conversation(target, timeout=timeout) as conv:
             await _send_with_floodwait(lambda: conv.send_message(text), logger)
             response = await _get_response_with_floodwait(conv, timeout, logger)
+            await _mark_read(client, target, response, logger)
             reply_text = (response.text or "").strip()
             reply_ts = response.date.isoformat() if response.date else None
             matched = True
