@@ -153,6 +153,19 @@ listeners:
     args: ["--target", "-1001472283197", "--url", "https://example.com/webhook"]
 ```
 
+## systemd 用户服务
+
+已提供服务文件：`systemd/tg-dog.service`。
+
+安装并启动：
+
+```
+mkdir -p ~/.config/systemd/user
+cp /home/sunnysab/Code/tg-dog/systemd/tg-dog.service ~/.config/systemd/user/tg-dog.service
+systemctl --user daemon-reload
+systemctl --user enable --now tg-dog
+```
+
 ## 插件机制
 
 - 插件放在 `plugins/<name>/plugin.py`

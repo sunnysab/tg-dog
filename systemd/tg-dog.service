@@ -1,0 +1,16 @@
+[Unit]
+Description=tg-dog Telegram daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/sunnysab/Code/tg-dog
+ExecStart=/home/sunnysab/Code/tg-dog/.venv/bin/tg-dog daemon --config /home/sunnysab/Code/tg-dog/config.yaml --log-file /home/sunnysab/Code/tg-dog/logs/daemon.log
+ExecStartPre=/usr/bin/mkdir -p /home/sunnysab/Code/tg-dog/logs /home/sunnysab/Code/tg-dog/data /home/sunnysab/Code/tg-dog/downloads /home/sunnysab/Code/tg-dog/sessions
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
