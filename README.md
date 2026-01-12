@@ -95,6 +95,37 @@ python main.py list-msgs --target @channel --limit 10
 python main.py daemon --config config.yaml --log-file logs/daemon.log
 ```
 
+## 插件机制
+
+- 插件放在 `plugins/<name>/plugin.py`
+- 必须实现 `run(context, args)` 或 `main(context, args)`
+- 命令行透传参数使用 `--` 分隔
+
+运行插件示例：
+
+```
+tg-dog plugin echo -- foo bar
+```
+
+列出插件：
+
+```
+tg-dog list-plugins
+```
+
+定时任务调用插件（示例）：
+
+```yaml
+tasks:
+  - profile: work_account
+    trigger_time: "*/5 * * * *"
+    action_type: plugin
+    target: "@unused"
+    payload:
+      plugin: "echo"
+      args: ["foo", "bar"]
+```
+
 ## 设计要点
 
 - Telethon `conversation` 实现“发送并等待回复”并带超时保护

@@ -7,6 +7,7 @@ from apscheduler.triggers.cron import CronTrigger
 from core.actions import download_media, interactive_send, list_messages, send_message
 from core.client_manager import ClientManager, safe_disconnect
 from core.config import resolve_profile
+from core.plugins import PluginError, run_plugin
 
 
 action_map = {
@@ -15,6 +16,7 @@ action_map = {
     "interactive_send": interactive_send,
     "download": download_media,
     "list": list_messages,
+    "plugin": None,
 }
 
 
@@ -39,25 +41,33 @@ async def _run_task(task: Dict[str, Any], config: Dict[str, Any], logger) -> Non
         if action_type not in action_map:
             logger.error("Unknown action_type '%s'", action_type)
             return
-        target = task.get("target")
-        if not target:
-            logger.error("Task missing 'target'")
-            return
         payload = task.get("payload") or {}
 
         if action_type in {"send_msg", "send"}:
+            target = task.get("target")
+            if not target:
+                logger.error("Task missing 'target'")
+                return
             text = payload.get("text") or payload.get("message")
             if not text:
                 logger.error("send action requires payload.text")
                 return
             await send_message(client, target, text, logger)
         elif action_type == "interactive_send":
+            target = task.get("target")
+            if not target:
+                logger.error("Task missing 'target'")
+                return
             text = payload.get("text") or payload.get("message")
             if not text:
                 logger.error("interactive_send requires payload.text")
                 return
             await interactive_send(client, target, text, logger, timeout=int(payload.get("timeout", 30)))
         elif action_type == "download":
+            target = task.get("target")
+            if not target:
+                logger.error("Task missing 'target'")
+                return
             await download_media(
                 client,
                 target,
@@ -69,8 +79,36 @@ async def _run_task(task: Dict[str, Any], config: Dict[str, Any], logger) -> Non
                 output_dir=payload.get("output_dir", "downloads"),
             )
         elif action_type == "list":
+            target = task.get("target")
+            if not target:
+                logger.error("Task missing 'target'")
+                return
             messages = await list_messages(client, target, int(payload.get("limit", 10)), logger)
             logger.info("Listed %s messages for %s", len(messages), target)
+        elif action_type == "plugin":
+            plugin_name = payload.get("plugin") or payload.get("name")
+            if not plugin_name:
+                logger.error("plugin action requires payload.plugin")
+                return
+            args = payload.get("args") or []
+            if isinstance(args, str):
+                args = [args]
+            try:
+                await run_plugin(
+                    plugin_name,
+                    {
+                        "config": config,
+                        "profile_name": profile_key,
+                        "profile": profile,
+                        "client": client,
+                        "logger": logger,
+                        "session_dir": "sessions",
+                    },
+                    list(args),
+                    logger,
+                )
+            except PluginError as exc:
+                logger.error("Plugin error: %s", exc)
     finally:
         await safe_disconnect(manager)
 

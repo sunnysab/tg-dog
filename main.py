@@ -10,6 +10,7 @@ from core.actions import download_media, interactive_send, list_messages, send_m
 from core.client_manager import ClientManager, safe_disconnect
 from core.config import ConfigError, load_config, resolve_profile
 from core.scheduler import build_scheduler, run_scheduler_until_stopped
+from core.plugins import PluginError, list_plugins, run_plugin
 
 app = typer.Typer(help="Telegram userbot CLI (Telethon + APScheduler)")
 
@@ -218,6 +219,59 @@ def daemon(
     except Exception as exc:
         logger.exception("Daemon failed: %s", exc)
         raise typer.Exit(code=1)
+
+
+@app.command(name="plugin")
+def plugin_cmd(
+    name: str = typer.Argument(..., help="Plugin name under plugins/"),
+    args: list[str] = typer.Argument(None, help="Arguments passed to plugin"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Profile name in config"),
+    config: str = typer.Option("config.yaml", "--config", help="Path to config.yaml"),
+    session_dir: str = typer.Option("sessions", "--session-dir", help="Session storage dir"),
+):
+    """Run a plugin with raw arguments."""
+    logger = _setup_logger()
+    try:
+        cfg = load_config(config)
+        profile_key, profile_data = resolve_profile(cfg, profile)
+    except ConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    async def _run():
+        manager = await _with_client(profile_key, profile_data, session_dir, False, logger)
+        try:
+            await run_plugin(
+                name,
+                {
+                    "config": cfg,
+                    "profile_name": profile_key,
+                    "profile": profile_data,
+                    "client": manager.client,
+                    "logger": logger,
+                    "session_dir": session_dir,
+                },
+                args or [],
+                logger,
+            )
+        finally:
+            await safe_disconnect(manager)
+
+    try:
+        asyncio.run(_run())
+    except PluginError as exc:
+        logger.error("Plugin error: %s", exc)
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        logger.exception("Plugin failed: %s", exc)
+        raise typer.Exit(code=1)
+
+
+@app.command(name="list-plugins")
+def list_plugins_cmd():
+    """List available plugins."""
+    for name in list_plugins():
+        typer.echo(name)
 
 
 if __name__ == "__main__":
