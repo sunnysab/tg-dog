@@ -6,6 +6,7 @@ import pathlib
 import click
 import typer
 from telethon.errors import FloodWaitError
+from telethon import events
 
 app = typer.Typer(help="搜索 VmomoVBot 并下载歌曲")
 
@@ -100,6 +101,33 @@ async def _mark_read(client, target, message, logger):
     )
 
 
+async def _wait_for_page_update(conv, target_entity, last_message_id: int, timeout: int):
+    edit_filter = events.MessageEdited(
+        chats=target_entity,
+        func=lambda e: e.message.id == last_message_id,
+    )
+    new_task = asyncio.create_task(conv.get_response(timeout=timeout))
+    edit_task = asyncio.create_task(conv.wait_event(edit_filter))
+    try:
+        done, pending = await asyncio.wait(
+            {new_task, edit_task},
+            timeout=timeout,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if not done:
+            raise asyncio.TimeoutError()
+        for task in pending:
+            task.cancel()
+        if new_task in done:
+            return new_task.result()
+        event = edit_task.result()
+        return event.message
+    finally:
+        for task in (new_task, edit_task):
+            if not task.done():
+                task.cancel()
+
+
 async def _search_and_download(
     context,
     query: str,
@@ -146,7 +174,10 @@ async def _search_and_download(
                         lambda: response.click(i=next_btn["i"], j=next_btn["j"]),
                         logger,
                     )
-                    response = await _call_with_floodwait(lambda: conv.get_response(timeout=timeout), logger)
+                    response = await _call_with_floodwait(
+                        lambda: _wait_for_page_update(conv, target_entity, response.id, timeout),
+                        logger,
+                    )
                     await _mark_read(client, target_entity, response, logger)
                     page += 1
                     continue
@@ -178,7 +209,10 @@ async def _search_and_download(
                 lambda: response.click(i=next_btn["i"], j=next_btn["j"]),
                 logger,
             )
-            response = await _call_with_floodwait(lambda: conv.get_response(timeout=timeout), logger)
+            response = await _call_with_floodwait(
+                lambda: _wait_for_page_update(conv, target_entity, response.id, timeout),
+                logger,
+            )
             await _mark_read(client, target_entity, response, logger)
             page += 1
 
