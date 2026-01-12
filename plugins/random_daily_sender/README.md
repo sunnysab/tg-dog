@@ -9,6 +9,9 @@
 - `--text` 发送内容
 - `--window` 随机时间窗口，例如 `09:00-23:00`
 - `--min-interval-hours` 最小间隔小时数，默认 24
+- `--expect-text` 期望回复的完整文本（可选）
+- `--expect-keyword` 期望回复包含的关键词（可选）
+- `--expect-timeout` 等待回复超时（秒）
 - `--state` 状态文件路径（JSON）
 
 ## 作为任务使用（推荐）
@@ -18,7 +21,7 @@
   action_type: plugin
   payload:
     plugin: "random_daily_sender"
-    args: ["--target", "7672228046", "--text", "/sign", "--window", "09:00-23:00", "--min-interval-hours", "24", "--state", "data/sign.json"]
+    args: ["--target", "7672228046", "--text", "/sign", "--window", "09:00-23:00", "--min-interval-hours", "24", "--expect-keyword", "成功", "--expect-timeout", "10", "--state", "data/sign.json"]
 ```
 
 建议每 3-10 分钟运行一次，以便命中随机时间点。

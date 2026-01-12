@@ -1,10 +1,12 @@
 import argparse
+import asyncio
 import json
 import pathlib
 import random
 from datetime import datetime, time, timedelta
 
 import typer
+from telethon.errors import FloodWaitError
 
 app = typer.Typer(help="随机时间每日发送消息")
 
@@ -53,6 +55,9 @@ def _parse_args(args: list[str]) -> argparse.Namespace:
     parser.add_argument("--text", required=True)
     parser.add_argument("--window", default="09:00-23:00")
     parser.add_argument("--min-interval-hours", type=int, default=24)
+    parser.add_argument("--expect-text")
+    parser.add_argument("--expect-keyword")
+    parser.add_argument("--expect-timeout", type=int, default=10)
     parser.add_argument("--state", default="data/random_daily_sender.json")
     return parser.parse_args(args)
 
@@ -67,6 +72,9 @@ def _normalize_target(target: str):
 async def _run(context, target: str, text: str, window: str, min_interval_hours: int, state_path: str):
     logger = context["logger"]
     client = context["client"]
+    expect_text = context.get("expect_text")
+    expect_keyword = context.get("expect_keyword")
+    expect_timeout = context.get("expect_timeout", 10)
 
     now = datetime.now().astimezone()
     today_str = now.date().isoformat()
@@ -107,18 +115,78 @@ async def _run(context, target: str, text: str, window: str, min_interval_hours:
             logger.info("Next send planned at %s", datetime.fromtimestamp(planned_ts, tz=now.tzinfo))
             return {"status": "planned", "planned": planned_ts}
 
-    await client.send_message(_normalize_target(target), text)
+    send_target = _normalize_target(target)
+    if expect_text or expect_keyword:
+        result = await _send_and_expect(
+            client,
+            send_target,
+            text,
+            expect_text=expect_text,
+            expect_keyword=expect_keyword,
+            timeout=expect_timeout,
+            logger=logger,
+        )
+        state["last_expect_result"] = result.get("status")
+        state["last_reply_text"] = result.get("reply_text")
+        state["last_reply_ts"] = result.get("reply_ts")
+    else:
+        await _send_with_floodwait(lambda: client.send_message(send_target, text), logger)
     state["last_sent_ts"] = now.timestamp()
     state["last_sent_date"] = today_str
     state["planned_ts"] = None
     state["planned_date"] = None
     _save_state(state_file, state)
     logger.info("Sent daily message to %s", target)
-    return {"status": "sent"}
+    return {"status": "sent", "expect": state.get("last_expect_result")}
+
+
+async def _send_with_floodwait(coro_factory, logger):
+    while True:
+        try:
+            return await coro_factory()
+        except FloodWaitError as exc:
+            wait_seconds = max(int(getattr(exc, "seconds", 0)), 1)
+            logger.warning("FloodWaitError: sleeping for %s seconds", wait_seconds)
+            await asyncio.sleep(wait_seconds)
+
+
+async def _get_response_with_floodwait(conv, timeout: int, logger):
+    while True:
+        try:
+            return await conv.get_response(timeout=timeout)
+        except FloodWaitError as exc:
+            wait_seconds = max(int(getattr(exc, "seconds", 0)), 1)
+            logger.warning("FloodWaitError: sleeping for %s seconds", wait_seconds)
+            await asyncio.sleep(wait_seconds)
+
+
+async def _send_and_expect(client, target, text, expect_text, expect_keyword, timeout, logger):
+    status = "unknown"
+    reply_text = None
+    reply_ts = None
+    try:
+        async with client.conversation(target, timeout=timeout) as conv:
+            await _send_with_floodwait(lambda: conv.send_message(text), logger)
+            response = await _get_response_with_floodwait(conv, timeout, logger)
+            reply_text = (response.text or "").strip()
+            reply_ts = response.date.isoformat() if response.date else None
+            matched = True
+            if expect_text is not None:
+                matched = matched and reply_text == expect_text
+            if expect_keyword is not None:
+                matched = matched and (expect_keyword in reply_text)
+            status = "success" if matched else "failed"
+    except asyncio.TimeoutError:
+        status = "timeout"
+    return {"status": status, "reply_text": reply_text, "reply_ts": reply_ts}
 
 
 async def run(context, args):
     options = _parse_args(args)
+    context = dict(context)
+    context["expect_text"] = options.expect_text
+    context["expect_keyword"] = options.expect_keyword
+    context["expect_timeout"] = options.expect_timeout
     return await _run(
         context,
         target=options.target,
@@ -135,6 +203,9 @@ def execute(
     text: str = typer.Option(..., "--text"),
     window: str = typer.Option("09:00-23:00", "--window"),
     min_interval_hours: int = typer.Option(24, "--min-interval-hours"),
+    expect_text: str = typer.Option(None, "--expect-text"),
+    expect_keyword: str = typer.Option(None, "--expect-keyword"),
+    expect_timeout: int = typer.Option(10, "--expect-timeout"),
     state: str = typer.Option("data/random_daily_sender.json", "--state"),
 ):
     ctx = typer.get_current_context()
@@ -142,6 +213,10 @@ def execute(
     call = context.get("call")
     if call is None:
         raise RuntimeError("context.call is required for CLI mode")
+    context = dict(context)
+    context["expect_text"] = expect_text
+    context["expect_keyword"] = expect_keyword
+    context["expect_timeout"] = expect_timeout
     call(
         _run(
             context,
