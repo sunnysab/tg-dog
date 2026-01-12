@@ -24,6 +24,8 @@ def load_config(path: str = "config.yaml") -> Dict[str, Any]:
         raise ConfigError("'api_hash' cannot be null if provided")
     if "proxy" in data and data["proxy"] is not None and not isinstance(data["proxy"], str):
         raise ConfigError("'proxy' must be a string URL if provided")
+    if "daemon_socket" in data and data["daemon_socket"] is not None and not isinstance(data["daemon_socket"], str):
+        raise ConfigError("'daemon_socket' must be a string path if provided")
     return data
 
 

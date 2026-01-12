@@ -95,11 +95,17 @@ python main.py list-msgs --target @channel --limit 10
 python main.py daemon --config config.yaml --log-file logs/daemon.log
 ```
 
+> 默认情况下，`run/list/plugin` 会优先尝试连接正在运行的 daemon，复用已登录账号。  
+> 如果不想使用 daemon，可加 `--no-daemon`。
+
 ## 插件机制
 
 - 插件放在 `plugins/<name>/plugin.py`
 - 必须实现 `run(context, args)` 或 `main(context, args)`
-- 命令行透传参数使用 `--` 分隔
+- 可选提供 `app = typer.Typer()` 或 `build_cli()` 以支持子命令
+- 命令行透传参数可使用 `--` 分隔
+- 插件 CLI 中如需调用异步 Telethon，请使用 `context["call"](coro)` 执行协程
+- 业务插件模板见 `plugins/business_template`
 
 运行插件示例：
 
@@ -124,6 +130,7 @@ tasks:
     payload:
       plugin: "echo"
       args: ["foo", "bar"]
+      # mode: cli  # 可选：用 Typer 子命令方式执行
 ```
 
 ## 设计要点

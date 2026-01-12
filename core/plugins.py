@@ -1,6 +1,10 @@
+import asyncio
 import importlib.util
 import pathlib
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+
+import typer
+from typer.main import get_command
 
 
 class PluginError(RuntimeError):
@@ -46,9 +50,35 @@ def load_plugin(name: str):
     return module
 
 
-async def run_plugin(name: str, context: Dict[str, Any], args: List[str], logger) -> Any:
+def _get_plugin_app(module):
+    app = getattr(module, "app", None)
+    if isinstance(app, typer.Typer):
+        return app
+    build_cli = getattr(module, "build_cli", None)
+    if callable(build_cli):
+        built = build_cli()
+        if isinstance(built, typer.Typer):
+            return built
+    return None
+
+
+def _get_plugin_runner(module):
+    return getattr(module, "run", None) or getattr(module, "main", None)
+
+
+def _call_helper(loop: Optional[asyncio.AbstractEventLoop]):
+    def _call(coro):
+        if loop is None:
+            return asyncio.run(coro)
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return future.result()
+
+    return _call
+
+
+async def run_plugin_code(name: str, context: Dict[str, Any], args: List[str], logger) -> Any:
     module = load_plugin(name)
-    runner = getattr(module, "run", None) or getattr(module, "main", None)
+    runner = _get_plugin_runner(module)
     if runner is None:
         raise PluginError("Plugin must define run(context, args) or main(context, args)")
 
@@ -56,3 +86,30 @@ async def run_plugin(name: str, context: Dict[str, Any], args: List[str], logger
     if hasattr(result, "__await__"):
         return await result
     return result
+
+
+async def run_plugin_cli(
+    name: str,
+    context: Dict[str, Any],
+    args: List[str],
+    logger,
+    loop: Optional[asyncio.AbstractEventLoop] = None,
+) -> Any:
+    module = load_plugin(name)
+    app = _get_plugin_app(module)
+    if app is None:
+        return await run_plugin_code(name, context, args, logger)
+
+    context = dict(context)
+    context["call"] = _call_helper(loop)
+    context["args"] = list(args)
+
+    command = get_command(app)
+    await asyncio.to_thread(
+        command.main,
+        args=args,
+        prog_name=f"tg-dog plugin {name}",
+        standalone_mode=False,
+        obj=context,
+    )
+    return None

@@ -18,6 +18,14 @@ def main(context, args):
     ...
 ```
 
+也可以提供 Typer 子命令（可选）：
+
+```python
+import typer
+
+app = typer.Typer()
+```
+
 ### context 结构
 
 - `config`: 解析后的配置字典
@@ -25,7 +33,7 @@ def main(context, args):
 - `profile`: 当前 profile 配置
 - `client`: Telethon 客户端实例
 - `logger`: 日志对象
-- `session_dir`: session 目录
+- `call`: 在 CLI 模式中执行协程的助手（`context["call"](coro)`）
 
 ### args 结构
 
@@ -48,4 +56,5 @@ tasks:
     payload:
       plugin: "echo"
       args: ["foo", "bar"]
+      # mode: cli  # 可选：用 Typer 子命令方式执行
 ```

@@ -4,26 +4,33 @@ from typing import Any, Dict
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from core.actions import download_media, interactive_send, list_messages, send_message
 from core.client_manager import ClientManager, safe_disconnect
 from core.config import resolve_profile
-from core.plugins import PluginError, run_plugin
+from core.executor import ActionError, execute_action
 
 
-action_map = {
-    "send_msg": send_message,
-    "send": send_message,
-    "interactive_send": interactive_send,
-    "download": download_media,
-    "list": list_messages,
-    "plugin": None,
-}
+action_map = {"send_msg", "send", "interactive_send", "download", "list", "plugin", "plugin_cli"}
 
 
-async def _run_task(task: Dict[str, Any], config: Dict[str, Any], logger) -> None:
+async def _run_task(task: Dict[str, Any], config: Dict[str, Any], logger, pool=None) -> None:
     profile_name = task.get("profile")
-    profile_key, profile = resolve_profile(config, profile_name)
+    action_type = task.get("action_type")
+    if action_type not in action_map:
+        logger.error("Unknown action_type '%s'", action_type)
+        return
+    payload = task.get("payload") or {}
+    target = task.get("target")
+    mode = payload.get("mode", "code")
+    args = payload.get("args")
 
+    if pool is not None:
+        try:
+            await pool.run_action(profile_name, action_type, target, payload, args=args, mode=mode)
+        except Exception as exc:
+            logger.error("Task failed: %s", exc)
+        return
+
+    profile_key, profile = resolve_profile(config, profile_name)
     manager = ClientManager(
         api_id=int(profile["api_id"]),
         api_hash=profile["api_hash"],
@@ -36,84 +43,27 @@ async def _run_task(task: Dict[str, Any], config: Dict[str, Any], logger) -> Non
         if not authorized:
             logger.error("Profile '%s' is not authorized; run auth first", profile_key)
             return
-        client = manager.client
-        action_type = task.get("action_type")
-        if action_type not in action_map:
-            logger.error("Unknown action_type '%s'", action_type)
-            return
-        payload = task.get("payload") or {}
-
-        if action_type in {"send_msg", "send"}:
-            target = task.get("target")
-            if not target:
-                logger.error("Task missing 'target'")
-                return
-            text = payload.get("text") or payload.get("message")
-            if not text:
-                logger.error("send action requires payload.text")
-                return
-            await send_message(client, target, text, logger)
-        elif action_type == "interactive_send":
-            target = task.get("target")
-            if not target:
-                logger.error("Task missing 'target'")
-                return
-            text = payload.get("text") or payload.get("message")
-            if not text:
-                logger.error("interactive_send requires payload.text")
-                return
-            await interactive_send(client, target, text, logger, timeout=int(payload.get("timeout", 30)))
-        elif action_type == "download":
-            target = task.get("target")
-            if not target:
-                logger.error("Task missing 'target'")
-                return
-            await download_media(
-                client,
-                target,
-                limit=int(payload.get("limit", 5)),
-                logger=logger,
-                media_type=payload.get("media_type", "any"),
-                min_size=payload.get("min_size"),
-                max_size=payload.get("max_size"),
-                output_dir=payload.get("output_dir", "downloads"),
-            )
-        elif action_type == "list":
-            target = task.get("target")
-            if not target:
-                logger.error("Task missing 'target'")
-                return
-            messages = await list_messages(client, target, int(payload.get("limit", 10)), logger)
-            logger.info("Listed %s messages for %s", len(messages), target)
-        elif action_type == "plugin":
-            plugin_name = payload.get("plugin") or payload.get("name")
-            if not plugin_name:
-                logger.error("plugin action requires payload.plugin")
-                return
-            args = payload.get("args") or []
-            if isinstance(args, str):
-                args = [args]
-            try:
-                await run_plugin(
-                    plugin_name,
-                    {
-                        "config": config,
-                        "profile_name": profile_key,
-                        "profile": profile,
-                        "client": client,
-                        "logger": logger,
-                        "session_dir": "sessions",
-                    },
-                    list(args),
-                    logger,
-                )
-            except PluginError as exc:
-                logger.error("Plugin error: %s", exc)
+        await execute_action(
+            action_type,
+            manager.client,
+            target,
+            payload,
+            config,
+            profile_key,
+            profile,
+            logger,
+            args=args,
+            mode=mode,
+            loop=asyncio.get_running_loop(),
+            session_dir=str(manager.session_dir) if hasattr(manager, "session_dir") else "sessions",
+        )
+    except ActionError as exc:
+        logger.error("Task failed: %s", exc)
     finally:
         await safe_disconnect(manager)
 
 
-def build_scheduler(config: Dict[str, Any], logger) -> AsyncIOScheduler:
+def build_scheduler(config: Dict[str, Any], logger, pool=None) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
     tasks = config.get("tasks") or []
     for index, task in enumerate(tasks, start=1):
@@ -130,7 +80,7 @@ def build_scheduler(config: Dict[str, Any], logger) -> AsyncIOScheduler:
         scheduler.add_job(
             _run_task,
             trigger=trigger,
-            args=[task, config, logger],
+            args=[task, config, logger, pool],
             id=f"task_{index}",
             max_instances=1,
             coalesce=True,

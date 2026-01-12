@@ -6,11 +6,12 @@ from typing import Optional
 
 import typer
 
-from core.actions import download_media, interactive_send, list_messages, send_message
 from core.client_manager import ClientManager, safe_disconnect
 from core.config import ConfigError, load_config, resolve_profile
-from core.scheduler import build_scheduler, run_scheduler_until_stopped
-from core.plugins import PluginError, list_plugins, run_plugin
+from core.daemon_runtime import run_daemon
+from core.executor import ActionError, execute_action
+from core.ipc import IpcError, send_request
+from core.plugins import PluginError, list_plugins, run_plugin_cli
 
 app = typer.Typer(help="Telegram userbot CLI (Telethon + APScheduler)")
 
@@ -38,6 +39,23 @@ def _redirect_std_streams(log_file: str) -> None:
     stream = open(path, "a", encoding="utf-8", buffering=1)
     sys.stdout = stream
     sys.stderr = stream
+
+
+def _daemon_socket(config: dict) -> str:
+    return str(config.get("daemon_socket", "logs/daemon.sock"))
+
+
+def _try_daemon_request(socket_path: str, request: dict, logger):
+    async def _send():
+        return await send_request(socket_path, request)
+
+    try:
+        return asyncio.run(_send())
+    except (FileNotFoundError, ConnectionError, IpcError, OSError):
+        return None
+    except Exception as exc:
+        logger.error("Daemon request failed: %s", exc)
+        return None
 
 
 async def _with_client(profile_key: str, profile: dict, session_dir: str, interactive: bool, logger):
@@ -100,6 +118,7 @@ def run(
     max_size: Optional[int] = typer.Option(None, "--max-size", help="Max file size in bytes"),
     output_dir: str = typer.Option("downloads", "--output-dir", help="Download output dir"),
     timeout: int = typer.Option(30, "--timeout", help="Conversation timeout seconds"),
+    no_daemon: bool = typer.Option(False, "--no-daemon", help="Do not use daemon if running"),
 ):
     """Run a single action immediately."""
     logger = _setup_logger()
@@ -114,38 +133,70 @@ def run(
     if action_lower == "send_msg":
         action_lower = "send"
 
+    payload = {}
+    if action_lower in {"send", "interactive_send"}:
+        if not text:
+            typer.echo("--text is required for send/interactive_send", err=True)
+            raise typer.Exit(code=1)
+        payload["text"] = text
+        if action_lower == "interactive_send":
+            payload["timeout"] = timeout
+    elif action_lower == "download":
+        payload.update(
+            {
+                "limit": limit,
+                "media_type": media_type,
+                "min_size": min_size,
+                "max_size": max_size,
+                "output_dir": output_dir,
+            }
+        )
+
+    if not no_daemon:
+        response = _try_daemon_request(
+            _daemon_socket(cfg),
+            {
+                "action": action_lower,
+                "profile": profile,
+                "target": target,
+                "payload": payload,
+            },
+            logger,
+        )
+        if response is not None:
+            if not response.get("ok"):
+                typer.echo(response.get("error", "Daemon request failed"), err=True)
+                raise typer.Exit(code=1)
+            result = response.get("result") or {}
+            if action_lower == "interactive_send":
+                typer.echo(result.get("response_text") or "")
+            return
+
     async def _run():
         manager = await _with_client(profile_key, profile_data, session_dir, False, logger)
         try:
-            client = manager.client
-            if action_lower == "send":
-                if not text:
-                    raise ValueError("--text is required for send")
-                await send_message(client, target, text, logger)
-            elif action_lower == "interactive_send":
-                if not text:
-                    raise ValueError("--text is required for interactive_send")
-                response = await interactive_send(client, target, text, logger, timeout=timeout)
-                if response is not None:
-                    typer.echo(response.text or "")
-            elif action_lower == "download":
-                await download_media(
-                    client,
-                    target,
-                    limit=limit,
-                    logger=logger,
-                    media_type=media_type,
-                    min_size=min_size,
-                    max_size=max_size,
-                    output_dir=output_dir,
-                )
-            else:
-                raise ValueError("Unsupported action; use send | interactive_send | download")
+            result = await execute_action(
+                action_lower,
+                manager.client,
+                target,
+                payload,
+                cfg,
+                profile_key,
+                profile_data,
+                logger,
+                loop=asyncio.get_running_loop(),
+                session_dir=session_dir,
+            )
+            if action_lower == "interactive_send":
+                typer.echo(result.get("response_text") or "")
         finally:
             await safe_disconnect(manager)
 
     try:
         asyncio.run(_run())
+    except ActionError as exc:
+        logger.error("Run failed: %s", exc)
+        raise typer.Exit(code=1)
     except Exception as exc:
         logger.exception("Run failed: %s", exc)
         raise typer.Exit(code=1)
@@ -158,6 +209,7 @@ def list_msgs(
     profile: Optional[str] = typer.Option(None, "--profile", help="Profile name in config"),
     config: str = typer.Option("config.yaml", "--config", help="Path to config.yaml"),
     session_dir: str = typer.Option("sessions", "--session-dir", help="Session storage dir"),
+    no_daemon: bool = typer.Option(False, "--no-daemon", help="Do not use daemon if running"),
 ):
     """List recent messages."""
     logger = _setup_logger()
@@ -168,10 +220,42 @@ def list_msgs(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
 
+    if not no_daemon:
+        response = _try_daemon_request(
+            _daemon_socket(cfg),
+            {
+                "action": "list",
+                "profile": profile,
+                "target": target,
+                "payload": {"limit": limit},
+            },
+            logger,
+        )
+        if response is not None:
+            if not response.get("ok"):
+                typer.echo(response.get("error", "Daemon request failed"), err=True)
+                raise typer.Exit(code=1)
+            result = response.get("result") or {}
+            for item in result.get("messages") or []:
+                typer.echo(f"[{item['date']}] {item['id']} {item['sender_id']}: {item['snippet']}")
+            return
+
     async def _run():
         manager = await _with_client(profile_key, profile_data, session_dir, False, logger)
         try:
-            messages = await list_messages(manager.client, target, limit, logger)
+            result = await execute_action(
+                "list",
+                manager.client,
+                target,
+                {"limit": limit},
+                cfg,
+                profile_key,
+                profile_data,
+                logger,
+                loop=asyncio.get_running_loop(),
+                session_dir=session_dir,
+            )
+            messages = result.get("messages") or []
             for item in messages:
                 typer.echo(f"[{item['date']}] {item['id']} {item['sender_id']}: {item['snippet']}")
         finally:
@@ -179,6 +263,9 @@ def list_msgs(
 
     try:
         asyncio.run(_run())
+    except ActionError as exc:
+        logger.error("List failed: %s", exc)
+        raise typer.Exit(code=1)
     except Exception as exc:
         logger.exception("List failed: %s", exc)
         raise typer.Exit(code=1)
@@ -191,15 +278,25 @@ def list_alias(
     profile: Optional[str] = typer.Option(None, "--profile", help="Profile name in config"),
     config: str = typer.Option("config.yaml", "--config", help="Path to config.yaml"),
     session_dir: str = typer.Option("sessions", "--session-dir", help="Session storage dir"),
+    no_daemon: bool = typer.Option(False, "--no-daemon", help="Do not use daemon if running"),
 ):
     """Alias for list-msgs."""
-    list_msgs(target=target, limit=limit, profile=profile, config=config, session_dir=session_dir)
+    list_msgs(
+        target=target,
+        limit=limit,
+        profile=profile,
+        config=config,
+        session_dir=session_dir,
+        no_daemon=no_daemon,
+    )
 
 
 @app.command()
 def daemon(
     config: str = typer.Option("config.yaml", "--config", help="Path to config.yaml"),
     log_file: str = typer.Option("logs/daemon.log", "--log-file", help="Daemon log file"),
+    socket_path: Optional[str] = typer.Option(None, "--socket", help="Daemon IPC socket path"),
+    session_dir: str = typer.Option("sessions", "--session-dir", help="Session storage dir"),
 ):
     """Run scheduled tasks as a daemon."""
     _redirect_std_streams(log_file)
@@ -210,24 +307,27 @@ def daemon(
         logger.error("Config error: %s", exc)
         raise typer.Exit(code=1)
 
-    async def _run():
-        scheduler = build_scheduler(cfg, logger)
-        await run_scheduler_until_stopped(scheduler, logger)
+    socket_path = socket_path or _daemon_socket(cfg)
+    existing = _try_daemon_request(socket_path, {"action": "ping"}, logger)
+    if existing and existing.get("ok"):
+        logger.error("Daemon already running at %s", socket_path)
+        raise typer.Exit(code=1)
 
     try:
-        asyncio.run(_run())
+        asyncio.run(run_daemon(cfg, logger, socket_path, session_dir=session_dir))
     except Exception as exc:
         logger.exception("Daemon failed: %s", exc)
         raise typer.Exit(code=1)
 
 
-@app.command(name="plugin")
+@app.command(name="plugin", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def plugin_cmd(
+    ctx: typer.Context,
     name: str = typer.Argument(..., help="Plugin name under plugins/"),
-    args: list[str] = typer.Argument(None, help="Arguments passed to plugin"),
     profile: Optional[str] = typer.Option(None, "--profile", help="Profile name in config"),
     config: str = typer.Option("config.yaml", "--config", help="Path to config.yaml"),
     session_dir: str = typer.Option("sessions", "--session-dir", help="Session storage dir"),
+    no_daemon: bool = typer.Option(False, "--no-daemon", help="Do not use daemon if running"),
 ):
     """Run a plugin with raw arguments."""
     logger = _setup_logger()
@@ -238,10 +338,30 @@ def plugin_cmd(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
 
+    args = list(ctx.args) if ctx else []
+
+    if not no_daemon:
+        response = _try_daemon_request(
+            _daemon_socket(cfg),
+            {
+                "action": "plugin_cli",
+                "profile": profile,
+                "payload": {"plugin": name},
+                "args": args,
+                "mode": "cli",
+            },
+            logger,
+        )
+        if response is not None:
+            if not response.get("ok"):
+                typer.echo(response.get("error", "Daemon request failed"), err=True)
+                raise typer.Exit(code=1)
+            return
+
     async def _run():
         manager = await _with_client(profile_key, profile_data, session_dir, False, logger)
         try:
-            await run_plugin(
+            await run_plugin_cli(
                 name,
                 {
                     "config": cfg,
@@ -251,8 +371,9 @@ def plugin_cmd(
                     "logger": logger,
                     "session_dir": session_dir,
                 },
-                args or [],
+                args,
                 logger,
+                loop=asyncio.get_running_loop(),
             )
         finally:
             await safe_disconnect(manager)
