@@ -45,13 +45,31 @@ def _resolve_media_filter(media_type: str):
     return None
 
 
+async def _resolve_target(client, target: str, logger):
+    if not isinstance(target, str):
+        return target
+    value = target.strip()
+    if not value:
+        raise ValueError("Target is empty")
+    if value.isdigit() or (value.startswith("-") and value[1:].isdigit()):
+        numeric = int(value)
+        try:
+            return await client.get_input_entity(numeric)
+        except Exception:
+            logger.debug("Failed to resolve numeric target %s via cache", value)
+            return numeric
+    return value
+
+
 async def send_message(client, target: str, text: str, logger) -> None:
-    await _call_with_floodwait(lambda: client.send_message(target, text), logger)
+    entity = await _resolve_target(client, target, logger)
+    await _call_with_floodwait(lambda: client.send_message(entity, text), logger)
 
 
 async def interactive_send(client, target: str, text: str, logger, timeout: int = 30):
     async def _send_and_wait():
-        async with client.conversation(target, timeout=timeout) as conv:
+        entity = await _resolve_target(client, target, logger)
+        async with client.conversation(entity, timeout=timeout) as conv:
             await conv.send_message(text)
             return await conv.get_response(timeout=timeout)
 
@@ -96,7 +114,8 @@ async def _iter_dialogs_with_floodwait(client, logger, limit: int) -> AsyncItera
 
 async def list_messages(client, target: str, limit: int, logger):
     results = []
-    async for message in _iter_messages_with_floodwait(client, target, logger, limit=limit):
+    entity = await _resolve_target(client, target, logger)
+    async for message in _iter_messages_with_floodwait(client, entity, logger, limit=limit):
         snippet = (message.text or "").strip().replace("\n", " ")
         if len(snippet) > 80:
             snippet = snippet[:77] + "..."
@@ -163,11 +182,12 @@ async def download_media(
     output_path = pathlib.Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     message_filter = _resolve_media_filter(media_type)
+    entity = await _resolve_target(client, target, logger)
 
     downloaded = 0
     async for message in _iter_messages_with_floodwait(
         client,
-        target,
+        entity,
         logger,
         limit=limit,
         filter=message_filter,
