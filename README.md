@@ -31,6 +31,7 @@ pip install -e .
 ## 配置文件说明（config.yaml）
 
 - `api_id` / `api_hash`：全局 API 配置（所有账号复用）
+- `proxy`：可选的代理 URL（如 `http://127.0.0.1:8080` 或 `socks5://127.0.0.1:1080`，不支持认证）
 - `profiles`：多账号配置，每个键为别名，仅需填写手机号
 - `tasks`：定时任务列表，使用 Cron 表达式
 
@@ -39,6 +40,7 @@ pip install -e .
 ```yaml
 api_id: 123456
 api_hash: "shared_api_hash"
+proxy: "http://127.0.0.1:8080"
 
 profiles:
   work_account:

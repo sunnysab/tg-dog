@@ -1,17 +1,28 @@
 import asyncio
 import pathlib
 from typing import Optional
+from urllib.parse import urlparse
+
+import socks
 
 from telethon import TelegramClient
 
 
 class ClientManager:
-    def __init__(self, api_id: int, api_hash: str, phone_number: str, session_dir: str = "sessions") -> None:
+    def __init__(
+        self,
+        api_id: int,
+        api_hash: str,
+        phone_number: str,
+        session_dir: str = "sessions",
+        proxy_url: Optional[str] = None,
+    ) -> None:
         self.api_id = api_id
         self.api_hash = api_hash
         self.phone_number = phone_number
         self.session_dir = pathlib.Path(session_dir)
         self.session_dir.mkdir(parents=True, exist_ok=True)
+        self.proxy_url = proxy_url
         self._client: Optional[TelegramClient] = None
 
     @property
@@ -22,7 +33,8 @@ class ClientManager:
 
     def _build_client(self, session_name: str) -> TelegramClient:
         session_path = self.session_dir / f"{session_name}.session"
-        return TelegramClient(str(session_path), self.api_id, self.api_hash)
+        proxy = _parse_proxy(self.proxy_url) if self.proxy_url else None
+        return TelegramClient(str(session_path), self.api_id, self.api_hash, proxy=proxy)
 
     async def connect(self, session_name: str) -> TelegramClient:
         self._client = self._build_client(session_name)
@@ -56,3 +68,21 @@ async def safe_disconnect(manager: "ClientManager") -> None:
     except Exception:
         # Best-effort disconnect
         return
+
+
+def _parse_proxy(proxy_url: str) -> tuple:
+    parsed = urlparse(proxy_url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme in ("socks5", "socks5h"):
+        proxy_type = socks.SOCKS5
+    elif scheme == "http":
+        proxy_type = socks.HTTP
+    else:
+        raise ValueError("Unsupported proxy scheme; use socks5 or http")
+    host = parsed.hostname
+    port = parsed.port
+    if parsed.username or parsed.password:
+        raise ValueError("Proxy authentication is not supported; remove username/password from URL")
+    if not host or not port:
+        raise ValueError("Proxy URL must include host and port")
+    return (proxy_type, host, port)

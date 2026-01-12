@@ -26,6 +26,7 @@ async def _run_task(task: Dict[str, Any], config: Dict[str, Any], logger) -> Non
         api_id=int(profile["api_id"]),
         api_hash=profile["api_hash"],
         phone_number=profile["phone_number"],
+        proxy_url=profile.get("proxy"),
     )
     await manager.connect(profile_key)
     try:

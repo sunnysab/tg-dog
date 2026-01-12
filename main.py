@@ -45,6 +45,7 @@ async def _with_client(profile_key: str, profile: dict, session_dir: str, intera
         api_hash=profile["api_hash"],
         phone_number=profile["phone_number"],
         session_dir=session_dir,
+        proxy_url=profile.get("proxy"),
     )
     await manager.connect(profile_key)
     try:

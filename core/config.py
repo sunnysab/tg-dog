@@ -22,6 +22,8 @@ def load_config(path: str = "config.yaml") -> Dict[str, Any]:
         raise ConfigError("'api_id' cannot be null if provided")
     if "api_hash" in data and data["api_hash"] is None:
         raise ConfigError("'api_hash' cannot be null if provided")
+    if "proxy" in data and data["proxy"] is not None and not isinstance(data["proxy"], str):
+        raise ConfigError("'proxy' must be a string URL if provided")
     return data
 
 
@@ -44,12 +46,17 @@ def resolve_profile(config: Dict[str, Any], profile_name: str | None) -> tuple[s
 
 def _merge_profile(config: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
     merged = dict(profile)
+    if "proxy" in merged and merged["proxy"] is not None and not isinstance(merged["proxy"], str):
+        raise ConfigError("Profile 'proxy' must be a string URL if provided")
     if "api_id" not in merged:
         if "api_id" in config:
             merged["api_id"] = config["api_id"]
     if "api_hash" not in merged:
         if "api_hash" in config:
             merged["api_hash"] = config["api_hash"]
+    if "proxy" not in merged:
+        if "proxy" in config:
+            merged["proxy"] = config["proxy"]
     missing = [key for key in ("api_id", "api_hash", "phone_number") if key not in merged]
     if missing:
         raise ConfigError(f"Profile missing required keys: {', '.join(missing)}")
