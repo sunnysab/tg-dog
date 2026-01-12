@@ -7,7 +7,7 @@ profiles:
   personal:
     phone_number: '+10000000000'
 tasks:
-- profile: work_account
+- profile: work
   trigger_time: '*/5 * * * *'
   action_type: send_msg
   target: '@channel_or_user'
@@ -24,8 +24,25 @@ tasks:
     limit: 5
     max_size: 5242880
     output_dir: downloads
+- profile: work
+  trigger_time: '*/5 * * * *'
+  action_type: plugin
+  enabled: true
+  payload:
+    plugin: random_daily_sender
+    args:
+    - --target
+    - '@VmomoVBot'
+    - --text
+    - /checkin
+    - --window
+    - 09:00-23:00
+    - --min-interval-hours
+    - '24'
+    - --state
+    - data/vmomo_checkin.json
 listeners:
-- profile: work_account
+- profile: work
   plugin: webhook_listener
   enabled: true
   args:
