@@ -34,6 +34,7 @@ app = typer.Typer()
 - `client`: Telethon 客户端实例
 - `logger`: 日志对象
 - `call`: 在 CLI 模式中执行协程的助手（`context["call"](coro)`）
+- `session_dir`: session 目录
 
 ### args 结构
 
