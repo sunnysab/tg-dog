@@ -1,4 +1,5 @@
 import asyncio
+import mimetypes
 import pathlib
 from typing import AsyncIterator, Optional
 
@@ -167,6 +168,138 @@ async def list_dialogs(client, limit: int, logger):
             }
         )
     return results
+
+
+def _safe_filename(value: str) -> str:
+    safe = []
+    for ch in value:
+        if ch.isalnum() or ch in ("-", "_"):
+            safe.append(ch)
+        else:
+            safe.append("_")
+    name = "".join(safe).strip("_")
+    return name or "export"
+
+
+def _format_message_markdown(message, attachments: list[str]) -> str:
+    date = message.date.isoformat() if message.date else ""
+    sender = message.sender_id
+    header = f"### {date} | id={message.id} | from={sender}\n\n"
+    text = (message.text or "").strip()
+    if not text:
+        text = "_(no text)_"
+    body = f"{text}\n\n"
+    if attachments:
+        lines = ["Attachments:"]
+        for item in attachments:
+            if item.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
+                lines.append(f"- ![]({item})")
+            else:
+                lines.append(f"- [{item}]({item})")
+        body += "\n".join(lines) + "\n\n"
+    return header + body
+
+
+async def export_messages(
+    client,
+    target: str,
+    logger,
+    output: str,
+    mode: str = "single",
+    attachments_dir: Optional[str] = None,
+    limit: Optional[int] = None,
+    from_user: Optional[str] = None,
+    message_ids: Optional[list[int]] = None,
+):
+    entity = await _resolve_target(client, target, logger)
+    mode = mode.lower()
+    output_path = pathlib.Path(output)
+
+    if mode not in {"single", "per_message"}:
+        raise ValueError("mode must be 'single' or 'per_message'")
+
+    if mode == "single":
+        if output_path.suffix.lower() == ".md":
+            output_file = output_path
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            output_path.mkdir(parents=True, exist_ok=True)
+            output_file = output_path / f"{_safe_filename(str(target))}.md"
+        base_dir = output_file.parent
+    else:
+        output_path.mkdir(parents=True, exist_ok=True)
+        output_file = None
+        base_dir = output_path
+
+    attachments_base = pathlib.Path(attachments_dir) if attachments_dir else base_dir / "attachments"
+    attachments_base.mkdir(parents=True, exist_ok=True)
+
+    resolved_from_user = None
+    if from_user:
+        resolved_from_user = await _resolve_target(client, from_user, logger)
+
+    if message_ids:
+        messages = await client.get_messages(entity, ids=message_ids)
+        if not isinstance(messages, list):
+            messages = [messages]
+        messages = [msg for msg in messages if msg is not None]
+        messages.sort(key=lambda msg: msg.date or 0)
+        iterator = iter(messages)
+    else:
+        iterator = _iter_messages_with_floodwait(
+            client,
+            entity,
+            logger,
+            limit=limit,
+            reverse=True,
+            from_user=resolved_from_user,
+        )
+
+    exported = 0
+    writer = None
+    if output_file:
+        writer = output_file.open("w", encoding="utf-8")
+
+    async def _process(message):
+        nonlocal exported
+        attachments = []
+        if message.file:
+            ext = message.file.ext or ""
+            if not ext and message.file.mime_type:
+                ext = mimetypes.guess_extension(message.file.mime_type) or ""
+            name = message.file.name or f"{message.id}{ext}"
+            filename = f"{message.id}_{name}"
+            destination = attachments_base / filename
+            try:
+                await _call_with_floodwait(
+                    lambda: message.download_media(file=destination),
+                    logger,
+                )
+                relpath = pathlib.Path(destination).relative_to(base_dir)
+                attachments.append(relpath.as_posix())
+            except Exception:
+                logger.exception("Failed to download attachment for message %s", message.id)
+
+        content = _format_message_markdown(message, attachments)
+        if mode == "single":
+            writer.write(content)
+        else:
+            message_file = base_dir / f"{message.id}.md"
+            message_file.write_text(content, encoding="utf-8")
+        exported += 1
+
+    try:
+        if message_ids:
+            for message in messages:
+                await _process(message)
+        else:
+            async for message in iterator:
+                await _process(message)
+    finally:
+        if writer:
+            writer.close()
+
+    return {"exported": exported, "output": str(output_file or base_dir)}
 
 
 async def download_media(

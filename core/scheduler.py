@@ -16,6 +16,7 @@ action_map = {
     "download",
     "list",
     "list_dialogs",
+    "export",
     "plugin",
     "plugin_cli",
 }

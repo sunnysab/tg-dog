@@ -181,7 +181,7 @@ def send(
 
 @app.command()
 def run(
-    action: str = typer.Option(..., "--action", help="send | interactive_send | download"),
+    action: str = typer.Option(..., "--action", help="send | interactive_send | download | export"),
     target: str = typer.Option(..., "--target", help="Target username/channel"),
     text: Optional[str] = typer.Option(None, "--text", help="Message text"),
     profile: Optional[str] = typer.Option(None, "--profile", help="Profile name in config"),
@@ -193,6 +193,11 @@ def run(
     max_size: Optional[int] = typer.Option(None, "--max-size", help="Max file size in bytes"),
     output_dir: str = typer.Option("downloads", "--output-dir", help="Download output dir"),
     timeout: int = typer.Option(30, "--timeout", help="Conversation timeout seconds"),
+    export_output: str = typer.Option("exports", "--export-output", help="Export output path"),
+    export_mode: str = typer.Option("single", "--export-mode", help="single | per_message"),
+    attachments_dir: Optional[str] = typer.Option(None, "--attachments-dir", help="Attachments dir"),
+    from_user: Optional[str] = typer.Option(None, "--from-user", help="Filter by sender id/username"),
+    message_id: Optional[list[int]] = typer.Option(None, "--message-id", help="Message ID(s) to export"),
     no_daemon: bool = typer.Option(False, "--no-daemon", help="Do not use daemon if running"),
 ):
     """Run a single action immediately."""
@@ -224,6 +229,17 @@ def run(
                 "min_size": min_size,
                 "max_size": max_size,
                 "output_dir": output_dir,
+            }
+        )
+    elif action_lower == "export":
+        payload.update(
+            {
+                "output": export_output,
+                "mode": export_mode,
+                "attachments_dir": attachments_dir,
+                "limit": limit,
+                "from_user": from_user,
+                "message_ids": message_id,
             }
         )
 
@@ -364,6 +380,86 @@ def list_alias(
         session_dir=session_dir,
         no_daemon=no_daemon,
     )
+
+
+@app.command()
+def export(
+    target: str = typer.Option(..., "--target", help="Target username/channel"),
+    output: str = typer.Option("exports", "--output", help="Export output path"),
+    mode: str = typer.Option("single", "--mode", help="single | per_message"),
+    attachments_dir: Optional[str] = typer.Option(None, "--attachments-dir", help="Attachments dir"),
+    limit: int = typer.Option(0, "--limit", help="Limit number of messages (0 = all)"),
+    from_user: Optional[str] = typer.Option(None, "--from-user", help="Filter by sender id/username"),
+    message_id: Optional[list[int]] = typer.Option(None, "--message-id", help="Message ID(s) to export"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Profile name in config"),
+    config: str = typer.Option("config.yaml", "--config", help="Path to config.yaml"),
+    session_dir: str = typer.Option("sessions", "--session-dir", help="Session storage dir"),
+    no_daemon: bool = typer.Option(False, "--no-daemon", help="Do not use daemon if running"),
+):
+    """Export messages to markdown."""
+    logger = _setup_logger()
+    try:
+        cfg = load_config(config)
+        profile_key, profile_data = resolve_profile(cfg, profile)
+    except ConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    payload = {
+        "output": output,
+        "mode": mode,
+        "attachments_dir": attachments_dir,
+        "limit": None if limit == 0 else limit,
+        "from_user": from_user,
+        "message_ids": message_id,
+    }
+
+    if not no_daemon:
+        response = _try_daemon_request(
+            _daemon_socket(cfg),
+            {
+                "action": "export",
+                "profile": profile,
+                "target": target,
+                "payload": payload,
+            },
+            logger,
+        )
+        if response is not None:
+            if not response.get("ok"):
+                typer.echo(response.get("error", "Daemon request failed"), err=True)
+                raise typer.Exit(code=1)
+            result = response.get("result") or {}
+            typer.echo(f"Exported {result.get('exported', 0)} messages to {result.get('output')}")
+            return
+
+    async def _run():
+        manager = await _with_client(profile_key, profile_data, session_dir, False, logger)
+        try:
+            result = await execute_action(
+                "export",
+                manager.client,
+                target,
+                payload,
+                cfg,
+                profile_key,
+                profile_data,
+                logger,
+                loop=asyncio.get_running_loop(),
+                session_dir=session_dir,
+            )
+            typer.echo(f"Exported {result.get('exported', 0)} messages to {result.get('output')}")
+        finally:
+            await safe_disconnect(manager)
+
+    try:
+        asyncio.run(_run())
+    except ActionError as exc:
+        logger.error("Export failed: %s", exc)
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        logger.exception("Export failed: %s", exc)
+        raise typer.Exit(code=1)
 
 
 @app.command()

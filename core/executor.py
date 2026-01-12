@@ -1,7 +1,7 @@
 import json
 from typing import Any, Dict, List, Optional
 
-from core.actions import download_media, interactive_send, list_dialogs, list_messages, send_message
+from core.actions import download_media, export_messages, interactive_send, list_dialogs, list_messages, send_message
 from core.plugins import run_plugin_cli, run_plugin_code
 
 
@@ -72,6 +72,31 @@ async def execute_action(
     if action_type in {"list_dialogs", "dialogs"}:
         dialogs = await list_dialogs(client, int(payload.get("limit", 30)), logger)
         return {"dialogs": dialogs}
+    if action_type == "export":
+        if not target:
+            raise ActionError("Missing target")
+        output = payload.get("output") or "exports"
+        mode = payload.get("mode", "single")
+        attachments_dir = payload.get("attachments_dir")
+        limit = payload.get("limit")
+        from_user = payload.get("from_user")
+        message_ids = payload.get("message_ids")
+        if isinstance(message_ids, str):
+            message_ids = [int(value) for value in message_ids.split(",") if value]
+        if isinstance(message_ids, list):
+            message_ids = [int(value) for value in message_ids]
+        result = await export_messages(
+            client,
+            target,
+            logger,
+            output=output,
+            mode=mode,
+            attachments_dir=attachments_dir,
+            limit=limit,
+            from_user=from_user,
+            message_ids=message_ids,
+        )
+        return result
     if action_type in {"plugin", "plugin_cli"}:
         plugin_name = payload.get("plugin") or payload.get("name")
         if not plugin_name:

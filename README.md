@@ -100,6 +100,22 @@ tg-dog list-dialogs --limit 50
 ```
 输出里会包含 `target=-100xxxxxxxxxx` 的可直接使用值。
 
+新增：导出消息到 Markdown（带附件目录）
+
+```
+tg-dog export --target @channel --output exports --mode single
+tg-dog export --target @channel --mode per_message --attachments-dir exports/attachments
+tg-dog export --target @channel --message-id 123 --message-id 456
+tg-dog export --target @channel --from-user @someone --limit 100
+```
+
+说明：
+- `--mode single`：全部输出到单个 Markdown 文件
+- `--mode per_message`：每条消息一个 Markdown 文件
+- `--attachments-dir`：附件目录（图片/视频等）
+- `--from-user`：只导出指定发送者的消息
+- `--message-id`：导出指定消息
+
 6) 守护进程模式（定时任务）
 
 ```
