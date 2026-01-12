@@ -59,7 +59,7 @@ async def _with_client(profile_key: str, profile: dict, session_dir: str, intera
 
 @app.command()
 def auth(
-    profile: str = typer.Option(..., "--profile", help="Profile name in config"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Profile name in config"),
     config: str = typer.Option("config.yaml", "--config", help="Path to config.yaml"),
     session_dir: str = typer.Option("sessions", "--session-dir", help="Session storage dir"),
 ):
