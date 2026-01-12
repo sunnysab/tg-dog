@@ -70,6 +70,10 @@ python main.py auth --profile work_account
 ```
 python main.py run --action send --target @username --text "hello"
 ```
+或：
+```
+tg-dog send --target @username --text "hello"
+```
 
 3) 发送并等待回复（conversation）
 

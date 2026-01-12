@@ -105,6 +105,70 @@ def auth(
 
 
 @app.command()
+def send(
+    target: str = typer.Option(..., "--target", help="Target username/channel"),
+    text: str = typer.Option(..., "--text", help="Message text"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Profile name in config"),
+    config: str = typer.Option("config.yaml", "--config", help="Path to config.yaml"),
+    session_dir: str = typer.Option("sessions", "--session-dir", help="Session storage dir"),
+    no_daemon: bool = typer.Option(False, "--no-daemon", help="Do not use daemon if running"),
+):
+    """Send a message."""
+    logger = _setup_logger()
+    try:
+        cfg = load_config(config)
+        profile_key, profile_data = resolve_profile(cfg, profile)
+    except ConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    payload = {"text": text}
+    if not no_daemon:
+        response = _try_daemon_request(
+            _daemon_socket(cfg),
+            {
+                "action": "send",
+                "profile": profile,
+                "target": target,
+                "payload": payload,
+            },
+            logger,
+        )
+        if response is not None:
+            if not response.get("ok"):
+                typer.echo(response.get("error", "Daemon request failed"), err=True)
+                raise typer.Exit(code=1)
+            return
+
+    async def _run():
+        manager = await _with_client(profile_key, profile_data, session_dir, False, logger)
+        try:
+            await execute_action(
+                "send",
+                manager.client,
+                target,
+                payload,
+                cfg,
+                profile_key,
+                profile_data,
+                logger,
+                loop=asyncio.get_running_loop(),
+                session_dir=session_dir,
+            )
+        finally:
+            await safe_disconnect(manager)
+
+    try:
+        asyncio.run(_run())
+    except ActionError as exc:
+        logger.error("Send failed: %s", exc)
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        logger.exception("Send failed: %s", exc)
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def run(
     action: str = typer.Option(..., "--action", help="send | interactive_send | download"),
     target: str = typer.Option(..., "--target", help="Target username/channel"),
