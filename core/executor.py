@@ -67,7 +67,13 @@ async def execute_action(
     if action_type == "list":
         if not target:
             raise ActionError("Missing target")
-        messages = await list_messages(client, target, int(payload.get("limit", 10)), logger)
+        messages = await list_messages(
+            client,
+            target,
+            int(payload.get("limit", 10)),
+            logger,
+            mark_read=bool(payload.get("mark_read")),
+        )
         return {"messages": messages}
     if action_type in {"list_dialogs", "dialogs"}:
         dialogs = await list_dialogs(client, int(payload.get("limit", 30)), logger)
@@ -95,6 +101,7 @@ async def execute_action(
             limit=limit,
             from_user=from_user,
             message_ids=message_ids,
+            mark_read=bool(payload.get("mark_read")),
         )
         return result
     if action_type in {"plugin", "plugin_cli"}:

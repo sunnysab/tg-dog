@@ -200,6 +200,7 @@ def run(
     max_size: Optional[int] = typer.Option(None, "--max-size", help="Max file size in bytes"),
     output_dir: str = typer.Option("downloads", "--output-dir", help="Download output dir"),
     timeout: int = typer.Option(30, "--timeout", help="Conversation timeout seconds"),
+    mark_read: bool = typer.Option(False, "--mark-read", help="Mark messages as read"),
     export_output: str = typer.Option("exports", "--export-output", help="Export output path"),
     export_mode: str = typer.Option("single", "--export-mode", help="single | per_message"),
     attachments_dir: Optional[str] = typer.Option(None, "--attachments-dir", help="Attachments dir"),
@@ -247,6 +248,7 @@ def run(
                 "limit": limit,
                 "from_user": from_user,
                 "message_ids": message_id,
+                "mark_read": mark_read,
             }
         )
 
@@ -307,6 +309,7 @@ def list_msgs(
     profile: Optional[str] = typer.Option(None, "--profile", help="Profile name in config"),
     config: str = typer.Option("config.yaml", "--config", help="Path to config.yaml"),
     session_dir: str = typer.Option("sessions", "--session-dir", help="Session storage dir"),
+    mark_read: bool = typer.Option(False, "--mark-read", help="Mark messages as read"),
     no_daemon: bool = typer.Option(False, "--no-daemon", help="Do not use daemon if running"),
 ):
     """List recent messages."""
@@ -325,7 +328,7 @@ def list_msgs(
                 "action": "list",
                 "profile": profile,
                 "target": target,
-                "payload": {"limit": limit},
+                "payload": {"limit": limit, "mark_read": mark_read},
             },
             logger,
         )
@@ -345,7 +348,7 @@ def list_msgs(
                 "list",
                 manager.client,
                 target,
-                {"limit": limit},
+                {"limit": limit, "mark_read": mark_read},
                 cfg,
                 profile_key,
                 profile_data,
@@ -398,6 +401,7 @@ def export(
     limit: int = typer.Option(0, "--limit", help="Limit number of messages (0 = all)"),
     from_user: Optional[str] = typer.Option(None, "--from-user", help="Filter by sender id/username"),
     message_id: Optional[list[int]] = typer.Option(None, "--message-id", help="Message ID(s) to export"),
+    mark_read: bool = typer.Option(False, "--mark-read", help="Mark messages as read"),
     profile: Optional[str] = typer.Option(None, "--profile", help="Profile name in config"),
     config: str = typer.Option("config.yaml", "--config", help="Path to config.yaml"),
     session_dir: str = typer.Option("sessions", "--session-dir", help="Session storage dir"),
@@ -419,6 +423,7 @@ def export(
         "limit": None if limit == 0 else limit,
         "from_user": from_user,
         "message_ids": message_id,
+        "mark_read": mark_read,
     }
 
     if not no_daemon:

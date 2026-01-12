@@ -92,6 +92,10 @@ python main.py run --action download --target @chat --limit 5 --media-type photo
 ```
 python main.py list-msgs --target @channel --limit 10
 ```
+可选标记已读：
+```
+tg-dog list-msgs --target @channel --limit 10 --mark-read
+```
 
 如果是私有群组/频道，建议先用 `list-dialogs` 获取 `target`：
 
@@ -107,6 +111,7 @@ tg-dog export --target @channel --output exports --mode single
 tg-dog export --target @channel --mode per_message --attachments-dir exports/attachments
 tg-dog export --target @channel --message-id 123 --message-id 456
 tg-dog export --target @channel --from-user @someone --limit 100
+tg-dog export --target @channel --mode single --mark-read
 ```
 
 说明：

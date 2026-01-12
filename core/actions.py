@@ -113,10 +113,20 @@ async def _iter_dialogs_with_floodwait(client, logger, limit: int) -> AsyncItera
             yield dialog
 
 
-async def list_messages(client, target: str, limit: int, logger):
+async def _mark_read(client, target, max_id: int, logger) -> None:
+    await _call_with_floodwait(
+        lambda: client.send_read_acknowledge(target, max_id=max_id),
+        logger,
+    )
+
+
+async def list_messages(client, target: str, limit: int, logger, mark_read: bool = False):
     results = []
+    max_id = None
     entity = await _resolve_target(client, target, logger)
     async for message in _iter_messages_with_floodwait(client, entity, logger, limit=limit):
+        if max_id is None:
+            max_id = message.id
         snippet = (message.text or "").strip().replace("\n", " ")
         if len(snippet) > 80:
             snippet = snippet[:77] + "..."
@@ -128,6 +138,8 @@ async def list_messages(client, target: str, limit: int, logger):
                 "snippet": snippet,
             }
         )
+    if mark_read and max_id is not None:
+        await _mark_read(client, entity, max_id, logger)
     return results
 
 
@@ -210,6 +222,7 @@ async def export_messages(
     limit: Optional[int] = None,
     from_user: Optional[str] = None,
     message_ids: Optional[list[int]] = None,
+    mark_read: bool = False,
 ):
     entity = await _resolve_target(client, target, logger)
     mode = mode.lower()
@@ -256,12 +269,16 @@ async def export_messages(
         )
 
     exported = 0
+    max_id = None
     writer = None
     if output_file:
         writer = output_file.open("w", encoding="utf-8")
 
     async def _process(message):
         nonlocal exported
+        nonlocal max_id
+        if max_id is None or message.id > max_id:
+            max_id = message.id
         attachments = []
         if message.file:
             ext = message.file.ext or ""
@@ -298,6 +315,8 @@ async def export_messages(
     finally:
         if writer:
             writer.close()
+        if mark_read and max_id is not None:
+            await _mark_read(client, entity, max_id, logger)
 
     return {"exported": exported, "output": str(output_file or base_dir)}
 

@@ -20,7 +20,7 @@ async def main(profile: str, limit: int):
         authorized = await manager.ensure_authorized(interactive=False)
         if not authorized:
             raise RuntimeError("Profile not authorized; run auth")
-        messages = await list_messages(manager.client, "@VmomoVBot", limit, logger=_PrintLogger())
+        messages = await list_messages(manager.client, "@VmomoVBot", limit, logger=_PrintLogger(), mark_read=False)
         for item in messages:
             print(f"[{item['date']}] {item['id']} {item['sender_id']}: {item['snippet']}")
     finally:
