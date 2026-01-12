@@ -7,7 +7,8 @@ from telethon.tl.types import (
     InputMessagesFilterPhotos,
     InputMessagesFilterVideo,
     InputMessagesFilterDocument,
-    InputMessagesFilterAudio,
+    InputMessagesFilterMusic,
+    InputMessagesFilterVoice,
 )
 from tqdm import tqdm
 
@@ -38,7 +39,9 @@ def _resolve_media_filter(media_type: str):
     if media_type == "document":
         return InputMessagesFilterDocument
     if media_type == "audio":
-        return InputMessagesFilterAudio
+        return InputMessagesFilterMusic
+    if media_type == "voice":
+        return InputMessagesFilterVoice
     return None
 
 
