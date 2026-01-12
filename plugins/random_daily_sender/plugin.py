@@ -5,6 +5,7 @@ import pathlib
 import random
 from datetime import datetime, time, timedelta
 
+import click
 import typer
 from telethon.errors import FloodWaitError
 
@@ -208,7 +209,7 @@ def execute(
     expect_timeout: int = typer.Option(10, "--expect-timeout"),
     state: str = typer.Option("data/random_daily_sender.json", "--state"),
 ):
-    ctx = typer.get_current_context()
+    ctx = click.get_current_context()
     context = ctx.obj or {}
     call = context.get("call")
     if call is None:

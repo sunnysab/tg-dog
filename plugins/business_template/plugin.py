@@ -1,3 +1,4 @@
+import click
 import typer
 
 app = typer.Typer(help="Business plugin template")
@@ -5,7 +6,7 @@ app = typer.Typer(help="Business plugin template")
 
 @app.command()
 def send(target: str, text: str):
-    ctx = typer.get_current_context()
+    ctx = click.get_current_context()
     context = ctx.obj or {}
     client = context["client"]
     logger = context["logger"]

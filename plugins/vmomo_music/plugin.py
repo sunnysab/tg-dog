@@ -3,6 +3,7 @@ import asyncio
 import mimetypes
 import pathlib
 
+import click
 import typer
 from telethon.errors import FloodWaitError
 
@@ -217,7 +218,7 @@ def search(
     output: str = typer.Option("downloads/vmomo", "--output"),
     filename: str = typer.Option(None, "--filename"),
 ):
-    ctx = typer.get_current_context()
+    ctx = click.get_current_context()
     context = ctx.obj or {}
     call = context.get("call")
     if call is None:
