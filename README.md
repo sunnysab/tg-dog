@@ -30,16 +30,18 @@ pip install -e .
 
 ## 配置文件说明（config.yaml）
 
-- `profiles`：多账号配置，每个键为别名
+- `api_id` / `api_hash`：全局 API 配置（所有账号复用）
+- `profiles`：多账号配置，每个键为别名，仅需填写手机号
 - `tasks`：定时任务列表，使用 Cron 表达式
 
 示例：
 
 ```yaml
+api_id: 123456
+api_hash: "shared_api_hash"
+
 profiles:
   work_account:
-    api_id: 123456
-    api_hash: "your_api_hash"
     phone_number: "+10000000000"
 
 # default_profile: work_account

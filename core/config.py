@@ -18,6 +18,10 @@ def load_config(path: str = "config.yaml") -> Dict[str, Any]:
         raise ConfigError("Config must contain a non-empty 'profiles' mapping")
     if "tasks" in data and data["tasks"] is not None and not isinstance(data["tasks"], list):
         raise ConfigError("'tasks' must be a list if provided")
+    if "api_id" in data and data["api_id"] is None:
+        raise ConfigError("'api_id' cannot be null if provided")
+    if "api_hash" in data and data["api_hash"] is None:
+        raise ConfigError("'api_hash' cannot be null if provided")
     return data
 
 
@@ -26,11 +30,27 @@ def resolve_profile(config: Dict[str, Any], profile_name: str | None) -> tuple[s
     if profile_name:
         if profile_name not in profiles:
             raise ConfigError(f"Profile '{profile_name}' not found in config")
-        return profile_name, profiles[profile_name]
+        profile = profiles[profile_name]
+        return profile_name, _merge_profile(config, profile)
     default_profile = config.get("default_profile")
     if default_profile:
         if default_profile not in profiles:
             raise ConfigError("'default_profile' does not match any profile in config")
-        return default_profile, profiles[default_profile]
+        profile = profiles[default_profile]
+        return default_profile, _merge_profile(config, profile)
     first_name = next(iter(profiles))
-    return first_name, profiles[first_name]
+    return first_name, _merge_profile(config, profiles[first_name])
+
+
+def _merge_profile(config: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(profile)
+    if "api_id" not in merged:
+        if "api_id" in config:
+            merged["api_id"] = config["api_id"]
+    if "api_hash" not in merged:
+        if "api_hash" in config:
+            merged["api_hash"] = config["api_hash"]
+    missing = [key for key in ("api_id", "api_hash", "phone_number") if key not in merged]
+    if missing:
+        raise ConfigError(f"Profile missing required keys: {', '.join(missing)}")
+    return merged
