@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 *.pyd
 *.session
+config.yaml
 sessions/
 logs/
 downloads/

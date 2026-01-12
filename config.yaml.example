@@ -1,0 +1,24 @@
+api_id: 123456
+api_hash: your_api_hash
+proxy: socks5://127.0.0.1:7890
+profiles:
+  work:
+    phone_number: '+10000000000'
+  personal:
+    phone_number: '+10000000000'
+tasks:
+- profile: work_account
+  trigger_time: '*/5 * * * *'
+  action_type: send_msg
+  target: '@channel_or_user'
+  payload:
+    text: Scheduled hello
+- profile: personal
+  trigger_time: 0 * * * *
+  action_type: download
+  target: '@chat'
+  payload:
+    media_type: photo
+    limit: 5
+    max_size: 5242880
+    output_dir: downloads
