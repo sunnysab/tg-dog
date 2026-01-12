@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import logging.handlers
 import pathlib
+import socket
 import sys
 from typing import Optional
 
@@ -32,7 +34,12 @@ def _setup_logger(name: str = "tg-dog", log_file: Optional[str] = None) -> loggi
     if log_file:
         path = pathlib.Path(log_file)
         path.parent.mkdir(parents=True, exist_ok=True)
-        handler = logging.FileHandler(path, encoding="utf-8")
+        handler = logging.handlers.RotatingFileHandler(
+            path,
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
     else:
         handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(formatter)
@@ -50,6 +57,33 @@ def _redirect_std_streams(log_file: str) -> None:
 
 def _daemon_socket(config: dict) -> str:
     return str(config.get("daemon_socket", "logs/daemon.sock"))
+
+
+def _cleanup_stale_socket(socket_path: str, logger) -> bool:
+    path = pathlib.Path(socket_path)
+    if not path.exists():
+        return False
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(1)
+        sock.connect(socket_path)
+    except ConnectionRefusedError:
+        try:
+            path.unlink()
+            logger.warning("Removed stale socket file %s", socket_path)
+        except Exception:
+            logger.warning("Failed to remove stale socket file %s", socket_path)
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return False
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+    return False
 
 
 def _try_daemon_request(socket_path: str, request: dict, logger):
@@ -491,6 +525,7 @@ def daemon(
         raise typer.Exit(code=1)
 
     socket_path = socket_path or _daemon_socket(cfg)
+    _cleanup_stale_socket(socket_path, logger)
     existing = _try_daemon_request(socket_path, {"action": "ping"}, logger)
     if existing and existing.get("ok"):
         logger.error("Daemon already running at %s", socket_path)
@@ -549,9 +584,7 @@ def plugin_cmd(
             {
                 "action": "plugin_cli",
                 "profile": profile,
-                "payload": {"plugin": name},
-                "args": args,
-                "mode": "cli",
+                "payload": {"plugin": name, "args": args, "mode": "cli"},
             },
             logger,
         )

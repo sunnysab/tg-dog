@@ -1,4 +1,6 @@
 import asyncio
+import pathlib
+import socket
 from typing import Any, Dict, Optional
 
 from core.client_manager import ClientManager, safe_disconnect
@@ -76,13 +78,43 @@ class ClientPool:
         self._locks.clear()
 
 
+def _cleanup_stale_socket(socket_path: str, logger) -> bool:
+    path = pathlib.Path(socket_path)
+    if not path.exists():
+        return False
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(1)
+        sock.connect(socket_path)
+    except ConnectionRefusedError:
+        try:
+            path.unlink()
+            logger.warning("Removed stale socket file %s", socket_path)
+        except Exception:
+            logger.warning("Failed to remove stale socket file %s", socket_path)
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return False
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+    return False
+
+
 async def run_daemon(
     config: Dict[str, Any],
     logger,
     socket_path: str,
     session_dir: str = "sessions",
 ) -> None:
+    if _cleanup_stale_socket(socket_path, logger):
+        logger.info("Stale socket cleaned before daemon start")
     pool = ClientPool(config, session_dir, logger)
+    stop_event = asyncio.Event()
 
     async def _setup_listeners():
         listeners = config.get("listeners") or []
@@ -122,14 +154,18 @@ async def run_daemon(
         action = request.get("action")
         if action == "ping":
             return {"ok": True}
+        if action == "shutdown":
+            stop_event.set()
+            return {"ok": True}
         try:
+            payload = request.get("payload") or {}
             result = await pool.run_action(
                 profile_name=request.get("profile"),
                 action_type=action,
                 target=request.get("target"),
-                payload=request.get("payload") or {},
-                args=request.get("args"),
-                mode=request.get("mode", "code"),
+                payload=payload,
+                args=payload.get("args"),
+                mode=payload.get("mode", "code"),
             )
             return {"ok": True, "result": result}
         except (ActionError, DaemonError) as exc:
@@ -141,8 +177,6 @@ async def run_daemon(
     scheduler = build_scheduler(config, logger, pool=pool)
     await _setup_listeners()
     server = await start_server(socket_path, _handle, logger)
-
-    stop_event = asyncio.Event()
 
     def _stop():
         logger.info("Shutdown signal received")

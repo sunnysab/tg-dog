@@ -2,7 +2,8 @@ import asyncio
 import importlib.util
 import json
 import pathlib
-from typing import Any, Dict, List, Optional
+import sys
+from typing import Any, Dict, List, Optional, Tuple
 
 import typer
 from typer.main import get_command
@@ -10,6 +11,9 @@ from typer.main import get_command
 
 class PluginError(RuntimeError):
     pass
+
+
+_PLUGIN_CACHE: Dict[str, Tuple[float, Any]] = {}
 
 
 def _project_root() -> pathlib.Path:
@@ -81,11 +85,17 @@ def load_plugin(name: str):
     if not plugin_file.exists():
         raise PluginError(f"Plugin '{name}' missing plugin.py")
     module_name = f"tg_dog_plugin_{name}"
+    mtime = plugin_file.stat().st_mtime
+    cached = _PLUGIN_CACHE.get(name)
+    if cached and cached[0] == mtime:
+        return cached[1]
     spec = importlib.util.spec_from_file_location(module_name, plugin_file)
     if spec is None or spec.loader is None:
         raise PluginError(f"Failed to load plugin '{name}'")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
+    _PLUGIN_CACHE[name] = (mtime, module)
     return module
 
 
