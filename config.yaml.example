@@ -40,7 +40,7 @@ tasks:
     - --min-interval-hours
     - '24'
     - --state
-    - data/vmomo_checkin.json
+    - data/state.yaml
 listeners:
 - profile: work
   plugin: webhook_listener

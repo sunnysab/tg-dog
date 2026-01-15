@@ -139,13 +139,13 @@ tasks:
     action_type: plugin
     payload:
       plugin: "random_daily_sender"
-      args: ["--target", "7672228046", "--text", "/sign", "--window", "09:00-23:00", "--min-interval-hours", "24", "--state", "data/sign.json"]
+      args: ["--target", "7672228046", "--text", "/sign", "--window", "09:00-23:00", "--min-interval-hours", "24", "--state", "data/state.yaml"]
   - profile: work_account
     trigger_time: "*/5 * * * *"
     action_type: plugin
     payload:
       plugin: "random_daily_sender"
-      args: ["--target", "5778226799", "--text", "/checkin", "--window", "09:00-23:00", "--min-interval-hours", "24", "--state", "data/checkin.json"]
+      args: ["--target", "5778226799", "--text", "/checkin", "--window", "09:00-23:00", "--min-interval-hours", "24", "--state", "data/state.yaml"]
 
 listeners:
   - profile: work_account

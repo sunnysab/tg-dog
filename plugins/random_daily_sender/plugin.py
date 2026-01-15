@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import hashlib
 import json
 import pathlib
 import random
@@ -18,6 +19,7 @@ except ImportError:  # pragma: no cover - non-Windows
 
 import click
 import typer
+import yaml
 from telethon.errors import FloodWaitError
 
 app = typer.Typer(help="随机时间每日发送消息")
@@ -34,17 +36,33 @@ def _parse_window(value: str) -> tuple[time, time]:
     return start, end
 
 
+def _is_yaml(path: pathlib.Path) -> bool:
+    return path.suffix.lower() in {".yml", ".yaml"}
+
+
 def _load_state(path: pathlib.Path) -> dict:
     if not path.exists():
         return {}
     with path.open("r", encoding="utf-8") as f:
+        if _is_yaml(path):
+            data = yaml.safe_load(f)
+            return data if isinstance(data, dict) else {}
         return json.load(f)
 
 
 def _save_state(path: pathlib.Path, state: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+        if _is_yaml(path):
+            yaml.safe_dump(
+                state,
+                f,
+                allow_unicode=True,
+                default_flow_style=False,
+                sort_keys=True,
+            )
+        else:
+            json.dump(state, f, ensure_ascii=False, indent=2)
 
 
 @contextmanager
@@ -107,7 +125,7 @@ def _parse_args(args: list[str]) -> argparse.Namespace:
     parser.add_argument("--expect-text")
     parser.add_argument("--expect-keyword")
     parser.add_argument("--expect-timeout", type=int, default=10)
-    parser.add_argument("--state", default="data/random_daily_sender.json")
+    parser.add_argument("--state", default="data/state.yaml")
     return parser.parse_args(args)
 
 
@@ -125,6 +143,42 @@ def _as_float(value):
         return None
 
 
+def _state_identity(target, text, window, min_interval_hours, expect_text, expect_keyword):
+    return {
+        "target": target,
+        "text": text,
+        "window": window,
+        "min_interval_hours": min_interval_hours,
+        "expect_text": expect_text,
+        "expect_keyword": expect_keyword,
+    }
+
+
+def _state_key(identity: dict) -> str:
+    payload = json.dumps(identity, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _use_shared_state(state_path: pathlib.Path, state: dict) -> bool:
+    if _is_yaml(state_path):
+        return True
+    return isinstance(state.get("entries"), dict)
+
+
+def _get_state_entry(state: dict, key: str, use_shared: bool) -> dict:
+    if not use_shared:
+        return state
+    entries = state.get("entries")
+    if not isinstance(entries, dict):
+        entries = {}
+        state["entries"] = entries
+    entry = entries.get(key)
+    if not isinstance(entry, dict):
+        entry = {}
+        entries[key] = entry
+    return entry
+
+
 async def _run(context, target: str, text: str, window: str, min_interval_hours: int, state_path: str):
     logger = context["logger"]
     client = context["client"]
@@ -137,15 +191,20 @@ async def _run(context, target: str, text: str, window: str, min_interval_hours:
     start_t, end_t = _parse_window(window)
 
     state_file = pathlib.Path(state_path)
+    identity = _state_identity(target, text, window, min_interval_hours, expect_text, expect_keyword)
+    state_key = _state_key(identity)
     with _state_lock(state_file, logger) as lock:
         if lock is None:
             return {"status": "locked"}
 
         state = _load_state(state_file)
-        last_sent_ts = _as_float(state.get("last_sent_ts"))
-        last_sent_date = state.get("last_sent_date")
-        planned_ts = _as_float(state.get("planned_ts"))
-        planned_date = state.get("planned_date")
+        use_shared = _use_shared_state(state_file, state)
+        entry = _get_state_entry(state, state_key, use_shared)
+        entry.setdefault("identity", identity)
+        last_sent_ts = _as_float(entry.get("last_sent_ts"))
+        last_sent_date = entry.get("last_sent_date")
+        planned_ts = _as_float(entry.get("planned_ts"))
+        planned_date = entry.get("planned_date")
 
         if last_sent_date == today_str:
             logger.info("Already sent today for %s", target)
@@ -174,8 +233,8 @@ async def _run(context, target: str, text: str, window: str, min_interval_hours:
 
         if (not planned_ts) or (planned_date != today_str) or (planned_day is None) or (planned_day < now.date()):
             planned_ts, planned_date = _pick_planned_time(now, start_t, end_t, earliest_ts)
-            state["planned_ts"] = planned_ts
-            state["planned_date"] = planned_date
+            entry["planned_ts"] = planned_ts
+            entry["planned_date"] = planned_date
             _save_state(state_file, state)
 
         if planned_date != today_str:
@@ -197,18 +256,18 @@ async def _run(context, target: str, text: str, window: str, min_interval_hours:
                 timeout=expect_timeout,
                 logger=logger,
             )
-            state["last_expect_result"] = result.get("status")
-            state["last_reply_text"] = result.get("reply_text")
-            state["last_reply_ts"] = result.get("reply_ts")
+            entry["last_expect_result"] = result.get("status")
+            entry["last_reply_text"] = result.get("reply_text")
+            entry["last_reply_ts"] = result.get("reply_ts")
         else:
             await _send_with_floodwait(lambda: client.send_message(send_target, text), logger)
-        state["last_sent_ts"] = now.timestamp()
-        state["last_sent_date"] = today_str
-        state["planned_ts"] = None
-        state["planned_date"] = None
+    entry["last_sent_ts"] = now.timestamp()
+    entry["last_sent_date"] = today_str
+    entry["planned_ts"] = None
+    entry["planned_date"] = None
         _save_state(state_file, state)
         logger.info("Sent daily message to %s", target)
-        return {"status": "sent", "expect": state.get("last_expect_result")}
+    return {"status": "sent", "expect": entry.get("last_expect_result")}
 
 
 async def _send_with_floodwait(coro_factory, logger):
@@ -285,7 +344,7 @@ def execute(
     expect_text: str = typer.Option(None, "--expect-text"),
     expect_keyword: str = typer.Option(None, "--expect-keyword"),
     expect_timeout: int = typer.Option(10, "--expect-timeout"),
-    state: str = typer.Option("data/random_daily_sender.json", "--state"),
+    state: str = typer.Option("data/state.yaml", "--state"),
 ):
     ctx = click.get_current_context()
     context = ctx.obj or {}
