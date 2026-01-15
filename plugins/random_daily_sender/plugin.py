@@ -3,7 +3,18 @@ import asyncio
 import json
 import pathlib
 import random
+from contextlib import contextmanager
 from datetime import datetime, time, timedelta
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX
+    fcntl = None
+
+try:
+    import msvcrt
+except ImportError:  # pragma: no cover - non-Windows
+    msvcrt = None
 
 import click
 import typer
@@ -34,6 +45,43 @@ def _save_state(path: pathlib.Path, state: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+@contextmanager
+def _state_lock(path: pathlib.Path, logger):
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = lock_path.open("a+", encoding="utf-8")
+    locked = False
+    try:
+        if fcntl is not None:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                locked = True
+            except BlockingIOError:
+                logger.info("State file locked, skip this run")
+                yield None
+                return
+        elif msvcrt is not None:
+            try:
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                locked = True
+            except OSError:
+                logger.info("State file locked, skip this run")
+                yield None
+                return
+        yield lock_file
+    finally:
+        if locked:
+            try:
+                if fcntl is not None:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                elif msvcrt is not None:
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            finally:
+                lock_file.close()
+        else:
+            lock_file.close()
 
 
 def _pick_planned_time(now: datetime, start_t: time, end_t: time, earliest_ts: float) -> tuple[float, str]:
@@ -70,6 +118,13 @@ def _normalize_target(target: str):
     return value
 
 
+def _as_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 async def _run(context, target: str, text: str, window: str, min_interval_hours: int, state_path: str):
     logger = context["logger"]
     client = context["client"]
@@ -82,63 +137,78 @@ async def _run(context, target: str, text: str, window: str, min_interval_hours:
     start_t, end_t = _parse_window(window)
 
     state_file = pathlib.Path(state_path)
-    state = _load_state(state_file)
-    last_sent_ts = state.get("last_sent_ts")
-    last_sent_date = state.get("last_sent_date")
-    planned_ts = state.get("planned_ts")
-    planned_date = state.get("planned_date")
+    with _state_lock(state_file, logger) as lock:
+        if lock is None:
+            return {"status": "locked"}
 
-    if last_sent_date == today_str:
-        logger.info("Already sent today for %s", target)
-        return {"status": "already_sent"}
+        state = _load_state(state_file)
+        last_sent_ts = _as_float(state.get("last_sent_ts"))
+        last_sent_date = state.get("last_sent_date")
+        planned_ts = _as_float(state.get("planned_ts"))
+        planned_date = state.get("planned_date")
 
-    min_interval = max(min_interval_hours, 0) * 3600
-    earliest_ts = (last_sent_ts + min_interval) if last_sent_ts else now.timestamp()
+        if last_sent_date == today_str:
+            logger.info("Already sent today for %s", target)
+            return {"status": "already_sent"}
 
-    if planned_ts and planned_date:
-        try:
-            planned_day = datetime.fromisoformat(planned_date).date()
-        except ValueError:
-            planned_day = None
-        if planned_day and planned_day > now.date():
-            logger.info("Next send planned at %s", datetime.fromtimestamp(planned_ts, tz=now.tzinfo))
-            return {"status": "planned", "planned": planned_ts}
-        if planned_day == now.date() and now.timestamp() < planned_ts:
-            logger.info("Planned send at %s", datetime.fromtimestamp(planned_ts, tz=now.tzinfo))
-            return {"status": "scheduled", "planned": planned_ts}
+        min_interval = max(min_interval_hours, 0) * 3600
+        if last_sent_ts is not None and now.timestamp() < last_sent_ts + min_interval:
+            logger.info("Within min interval for %s", target)
+            return {"status": "min_interval"}
+        earliest_ts = (last_sent_ts + min_interval) if last_sent_ts else now.timestamp()
 
-    if not planned_ts or planned_date != today_str:
-        planned_ts, planned_date = _pick_planned_time(now, start_t, end_t, earliest_ts)
-        state["planned_ts"] = planned_ts
-        state["planned_date"] = planned_date
-        _save_state(state_file, state)
+        planned_day = None
+        if planned_date:
+            try:
+                planned_day = datetime.fromisoformat(planned_date).date()
+            except ValueError:
+                planned_day = None
+
+        if planned_ts and planned_day:
+            if planned_day > now.date():
+                logger.info("Next send planned at %s", datetime.fromtimestamp(planned_ts, tz=now.tzinfo))
+                return {"status": "planned", "planned": planned_ts}
+            if planned_day == now.date() and now.timestamp() < planned_ts:
+                logger.info("Planned send at %s", datetime.fromtimestamp(planned_ts, tz=now.tzinfo))
+                return {"status": "scheduled", "planned": planned_ts}
+
+        if (not planned_ts) or (planned_date != today_str) or (planned_day is None) or (planned_day < now.date()):
+            planned_ts, planned_date = _pick_planned_time(now, start_t, end_t, earliest_ts)
+            state["planned_ts"] = planned_ts
+            state["planned_date"] = planned_date
+            _save_state(state_file, state)
+
         if planned_date != today_str:
             logger.info("Next send planned at %s", datetime.fromtimestamp(planned_ts, tz=now.tzinfo))
             return {"status": "planned", "planned": planned_ts}
 
-    send_target = _normalize_target(target)
-    if expect_text or expect_keyword:
-        result = await _send_and_expect(
-            client,
-            send_target,
-            text,
-            expect_text=expect_text,
-            expect_keyword=expect_keyword,
-            timeout=expect_timeout,
-            logger=logger,
-        )
-        state["last_expect_result"] = result.get("status")
-        state["last_reply_text"] = result.get("reply_text")
-        state["last_reply_ts"] = result.get("reply_ts")
-    else:
-        await _send_with_floodwait(lambda: client.send_message(send_target, text), logger)
-    state["last_sent_ts"] = now.timestamp()
-    state["last_sent_date"] = today_str
-    state["planned_ts"] = None
-    state["planned_date"] = None
-    _save_state(state_file, state)
-    logger.info("Sent daily message to %s", target)
-    return {"status": "sent", "expect": state.get("last_expect_result")}
+        if now.timestamp() < planned_ts:
+            logger.info("Planned send at %s", datetime.fromtimestamp(planned_ts, tz=now.tzinfo))
+            return {"status": "scheduled", "planned": planned_ts}
+
+        send_target = _normalize_target(target)
+        if expect_text or expect_keyword:
+            result = await _send_and_expect(
+                client,
+                send_target,
+                text,
+                expect_text=expect_text,
+                expect_keyword=expect_keyword,
+                timeout=expect_timeout,
+                logger=logger,
+            )
+            state["last_expect_result"] = result.get("status")
+            state["last_reply_text"] = result.get("reply_text")
+            state["last_reply_ts"] = result.get("reply_ts")
+        else:
+            await _send_with_floodwait(lambda: client.send_message(send_target, text), logger)
+        state["last_sent_ts"] = now.timestamp()
+        state["last_sent_date"] = today_str
+        state["planned_ts"] = None
+        state["planned_date"] = None
+        _save_state(state_file, state)
+        logger.info("Sent daily message to %s", target)
+        return {"status": "sent", "expect": state.get("last_expect_result")}
 
 
 async def _send_with_floodwait(coro_factory, logger):
