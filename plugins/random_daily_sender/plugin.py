@@ -246,6 +246,8 @@ async def _run(context, target: str, text: str, window: str, min_interval_hours:
             return {"status": "scheduled", "planned": planned_ts}
 
         send_target = _normalize_target(target)
+        sent_ok = True
+        expect_status = None
         if expect_text or expect_keyword:
             result = await _send_and_expect(
                 client,
@@ -256,18 +258,24 @@ async def _run(context, target: str, text: str, window: str, min_interval_hours:
                 timeout=expect_timeout,
                 logger=logger,
             )
-            entry["last_expect_result"] = result.get("status")
+            expect_status = result.get("status")
+            entry["last_expect_result"] = expect_status
             entry["last_reply_text"] = result.get("reply_text")
             entry["last_reply_ts"] = result.get("reply_ts")
+            sent_ok = expect_status == "success"
         else:
             await _send_with_floodwait(lambda: client.send_message(send_target, text), logger)
-    entry["last_sent_ts"] = now.timestamp()
-    entry["last_sent_date"] = today_str
-    entry["planned_ts"] = None
-    entry["planned_date"] = None
+        entry["planned_ts"] = None
+        entry["planned_date"] = None
+        if sent_ok:
+            entry["last_sent_ts"] = now.timestamp()
+            entry["last_sent_date"] = today_str
         _save_state(state_file, state)
-        logger.info("Sent daily message to %s", target)
-    return {"status": "sent", "expect": entry.get("last_expect_result")}
+        if sent_ok:
+            logger.info("Sent daily message to %s", target)
+            return {"status": "sent", "expect": expect_status}
+        logger.warning("Expected response not satisfied for %s", target)
+        return {"status": "expect_failed", "expect": expect_status}
 
 
 async def _send_with_floodwait(coro_factory, logger):
