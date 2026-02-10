@@ -193,6 +193,31 @@ def _safe_filename(value: str) -> str:
     return name or "export"
 
 
+def _safe_output_name(value: str, fallback: str) -> str:
+    candidate = pathlib.Path(value or '').name
+    if not candidate:
+        candidate = fallback
+    candidate = candidate.replace('\x00', '')
+    safe = []
+    for ch in candidate:
+        if ch.isalnum() or ch in ('-', '_', '.'):
+            safe.append(ch)
+        else:
+            safe.append('_')
+    name = ''.join(safe).strip(' .')
+    if not name or name in {'.', '..'}:
+        return fallback
+    return name
+
+
+def _safe_destination(base_dir: pathlib.Path, filename: str) -> pathlib.Path:
+    destination = (base_dir / filename).resolve()
+    base_resolved = base_dir.resolve()
+    if not destination.is_relative_to(base_resolved):
+        raise ValueError(f'Unsafe destination filename: {filename}')
+    return destination
+
+
 def _format_message_markdown(message, attachments: list[str]) -> str:
     date = message.date.isoformat() if message.date else ""
     sender = message.sender_id
@@ -285,9 +310,9 @@ async def export_messages(
             if not ext and message.file.mime_type:
                 ext = mimetypes.guess_extension(message.file.mime_type) or ""
             name = message.file.name or f"{message.id}{ext}"
-            filename = f"{message.id}_{name}"
-            destination = attachments_base / filename
+            filename = _safe_output_name(f"{message.id}_{name}", fallback=f'{message.id}{ext}')
             try:
+                destination = _safe_destination(attachments_base, filename)
                 await _call_with_floodwait(
                     lambda: message.download_media(file=destination),
                     logger,
@@ -352,8 +377,13 @@ async def download_media(
         if max_size is not None and file_size > max_size:
             continue
 
-        filename = message.file.name or f"{message.id}"
-        destination = output_path / filename
+        ext = message.file.ext or ''
+        filename = _safe_output_name(message.file.name or f'{message.id}{ext}', fallback=f'{message.id}{ext}')
+        try:
+            destination = _safe_destination(output_path, filename)
+        except ValueError:
+            logger.warning('Skip unsafe filename from message %s: %s', message.id, message.file.name)
+            continue
 
         with tqdm(total=file_size, unit="B", unit_scale=True, desc=filename) as bar:
             def _progress(current, total):

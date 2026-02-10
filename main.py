@@ -14,7 +14,7 @@ from core.action_payloads import (
     build_plugin_payload,
     build_run_payload,
 )
-from core.action_types import normalize_action_type
+from core.action_types import is_supported_action, normalize_action_type
 from core.cli_runtime import LocalRunContext, run_action_with_optional_daemon, try_daemon_request
 from core.client_manager import ClientManager, safe_disconnect
 from core.config import ConfigError, load_config, resolve_profile
@@ -32,13 +32,17 @@ from core.plugins import (
 app = typer.Typer(help='Telegram userbot CLI (Telethon + APScheduler)')
 
 
-def _setup_logger(name: str = 'tg-dog', log_file: Optional[str] = None) -> logging.Logger:
+def _setup_logger(
+    name: str = 'tg-dog',
+    log_file: Optional[str] = None,
+    stream_only: bool = False,
+) -> logging.Logger:
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
 
     formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
-    if log_file:
+    if log_file and not stream_only:
         path = pathlib.Path(log_file)
         path.parent.mkdir(parents=True, exist_ok=True)
         handler = logging.handlers.RotatingFileHandler(
@@ -232,6 +236,14 @@ def run(
     """Run a single action immediately."""
     logger = _setup_logger()
     action_type = normalize_action_type(action)
+    allowed_actions = {'send', 'interactive_send', 'download', 'export'}
+    if not is_supported_action(action_type) or action_type not in allowed_actions:
+        typer.echo(
+            "Unsupported --action. Use one of: send, interactive_send, download, export",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
     try:
         payload = build_run_payload(
             action_type,
@@ -367,7 +379,7 @@ def daemon(
 ):
     """Run scheduled tasks as a daemon."""
     _redirect_std_streams(log_file)
-    logger = _setup_logger(log_file=log_file)
+    logger = _setup_logger(log_file=log_file, stream_only=True)
     try:
         cfg = load_config(config)
     except ConfigError as exc:
