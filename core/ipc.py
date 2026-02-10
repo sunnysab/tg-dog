@@ -2,6 +2,7 @@ import asyncio
 import json
 import pathlib
 import socket
+import stat
 import struct
 from typing import Any, Awaitable, Callable, Dict
 
@@ -111,4 +112,17 @@ async def start_server(
         writer.close()
         await writer.wait_closed()
 
-    return await asyncio.start_unix_server(_handle, path=str(path))
+    server = await asyncio.start_unix_server(_handle, path=str(path))
+    try:
+        path.chmod(0o600)
+    except OSError as exc:
+        logger.warning('Failed to restrict socket permissions for %s: %s', path, exc)
+    return server
+
+
+def is_socket_owner_only(socket_path: str) -> bool:
+    path = pathlib.Path(socket_path)
+    if not path.exists():
+        return False
+    mode = path.stat().st_mode
+    return bool(mode & stat.S_IRUSR) and bool(mode & stat.S_IWUSR) and (mode & 0o077) == 0

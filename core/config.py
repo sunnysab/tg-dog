@@ -62,6 +62,7 @@ def load_config(path: str = "config.yaml") -> Dict[str, Any]:
         raise ConfigError("'api_hash' cannot be null if provided")
     _ensure_optional_string(data.get('proxy'), 'proxy')
     _ensure_optional_string(data.get('daemon_socket'), 'daemon_socket')
+    _ensure_optional_string(data.get('daemon_token'), 'daemon_token')
 
     if data.get('tasks') is not None:
         _ensure_task_or_listener_items(data['tasks'], 'tasks')

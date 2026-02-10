@@ -1,5 +1,6 @@
 import unittest
 
+from core.cli_runtime import _build_daemon_request
 from plugins.random_daily_sender import plugin as random_daily_plugin
 from plugins.vmomo_music import plugin as vmomo_plugin
 from plugins.webhook_listener import plugin as webhook_plugin
@@ -42,6 +43,14 @@ class PluginArgDefaultTests(unittest.TestCase):
         self.assertEqual(parsed.retry, 2)
         self.assertEqual(parsed.retry_delay, 1.0)
         self.assertEqual(parsed.header, [])
+
+    def test_build_daemon_request_with_and_without_token(self):
+        with_token = _build_daemon_request({'action': 'ping'}, 'secret-token')
+        self.assertEqual(with_token['action'], 'ping')
+        self.assertEqual(with_token['token'], 'secret-token')
+
+        without_token = _build_daemon_request({'action': 'ping'}, None)
+        self.assertEqual(without_token, {'action': 'ping'})
 
 
 if __name__ == '__main__':

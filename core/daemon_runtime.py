@@ -87,6 +87,9 @@ async def run_daemon(
         logger.info("Stale socket cleaned before daemon start")
     pool = ClientPool(config, session_dir, logger)
     stop_event = asyncio.Event()
+    daemon_token = config.get('daemon_token')
+    if daemon_token is not None:
+        daemon_token = str(daemon_token).strip() or None
 
     async def _setup_listeners():
         listeners = config.get("listeners") or []
@@ -123,6 +126,10 @@ async def run_daemon(
                 logger.exception("Listener %s failed: %s", index, exc)
 
     async def _handle(request: Dict[str, Any]) -> Dict[str, Any]:
+        if daemon_token:
+            request_token = request.get('token')
+            if request_token != daemon_token:
+                return {'ok': False, 'error': 'Unauthorized daemon request'}
         action = normalize_action_type(request.get('action'))
         if action == "ping":
             return {"ok": True}

@@ -30,4 +30,4 @@ tg-dog = "main:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["core"]
-include = ["main.py", "plugins/**", "README.md", "config.yaml"]
+include = ["main.py", "plugins/**", "README.md", "config.yaml.example"]

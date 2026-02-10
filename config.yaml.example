@@ -1,6 +1,9 @@
 api_id: 123456
 api_hash: your_api_hash
 proxy: socks5://127.0.0.1:7890
+daemon_socket: logs/daemon.sock
+# Optional but recommended on shared machines.
+daemon_token: change-me-to-a-random-long-token
 profiles:
   work:
     phone_number: '+10000000000'

@@ -33,6 +33,13 @@ def try_daemon_request(socket_path: str, request: dict[str, Any], logger):
         return None
 
 
+def _build_daemon_request(request: dict[str, Any], daemon_token: Optional[str]) -> dict[str, Any]:
+    payload = dict(request)
+    if daemon_token:
+        payload['token'] = daemon_token
+    return payload
+
+
 def run_action_local(
     local_ctx: LocalRunContext,
     action_type: str,
@@ -75,6 +82,7 @@ def run_action_with_optional_daemon(
     payload: dict[str, Any],
     profile_name: Optional[str],
     socket_path: str,
+    daemon_token: Optional[str],
     no_daemon: bool,
     logger,
     local_ctx: LocalRunContext,
@@ -83,12 +91,15 @@ def run_action_with_optional_daemon(
     if not no_daemon:
         response = try_daemon_request(
             socket_path,
-            {
-                'action': normalized,
-                'profile': profile_name,
-                'target': target,
-                'payload': payload,
-            },
+            _build_daemon_request(
+                {
+                    'action': normalized,
+                    'profile': profile_name,
+                    'target': target,
+                    'payload': payload,
+                },
+                daemon_token,
+            ),
             logger,
         )
         if response is not None:
@@ -97,4 +108,3 @@ def run_action_with_optional_daemon(
                 raise typer.Exit(code=1)
             return response.get('result') or {}
     return run_action_local(local_ctx, normalized, target, payload)
-

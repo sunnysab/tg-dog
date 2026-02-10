@@ -1,9 +1,11 @@
+import os
 import pathlib
 import tempfile
 import unittest
 
 from core.actions import _safe_destination, _safe_output_name
 from core.config import ConfigError, load_config, resolve_profile
+from core.ipc import is_socket_owner_only
 
 
 class SafetyAndConfigTests(unittest.TestCase):
@@ -56,6 +58,37 @@ class SafetyAndConfigTests(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 _safe_destination(base, '../evil.mp3')
+
+    def test_load_config_rejects_non_string_daemon_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = pathlib.Path(tmp) / 'config_invalid_token.yaml'
+            config_path.write_text(
+                '\n'.join(
+                    [
+                        'daemon_token: 12345',
+                        'profiles:',
+                        '  work:',
+                        '    api_id: 123',
+                        '    api_hash: hash',
+                        '    phone_number: "+10000000000"',
+                    ]
+                ),
+                encoding='utf-8',
+            )
+
+            with self.assertRaisesRegex(ConfigError, r"'daemon_token' must be a string"):
+                load_config(str(config_path))
+
+    def test_is_socket_owner_only_checks_permissions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            socket_path = pathlib.Path(tmp) / 'daemon.sock'
+            socket_path.write_text('', encoding='utf-8')
+
+            os.chmod(socket_path, 0o600)
+            self.assertTrue(is_socket_owner_only(str(socket_path)))
+
+            os.chmod(socket_path, 0o644)
+            self.assertFalse(is_socket_owner_only(str(socket_path)))
 
 
 if __name__ == '__main__':

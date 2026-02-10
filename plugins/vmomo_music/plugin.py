@@ -9,6 +9,8 @@ import typer
 from telethon import events
 from telethon.errors import FloodWaitError
 
+from core.actions import _safe_destination, _safe_output_name
+
 
 DEFAULT_TARGET = '@VmomoVBot'
 DEFAULT_CHOICE = 1
@@ -108,6 +110,17 @@ def _guess_filename(message, override: str | None) -> str:
     elif message.file and message.file.mime_type:
         ext = mimetypes.guess_extension(message.file.mime_type) or ""
     return f"{message.id}{ext or ''}"
+
+
+def _safe_media_destination(output_dir: pathlib.Path, message, override: str | None) -> pathlib.Path:
+    ext = ''
+    if message.file and message.file.ext:
+        ext = message.file.ext
+    elif message.file and message.file.mime_type:
+        ext = mimetypes.guess_extension(message.file.mime_type) or ''
+    guessed = _guess_filename(message, override)
+    safe_name = _safe_output_name(guessed, fallback=f'{message.id}{ext}')
+    return _safe_destination(output_dir, safe_name)
 
 
 async def _call_with_floodwait(coro_factory, logger):
@@ -243,8 +256,7 @@ async def _search_and_download(
         if not media_message:
             raise RuntimeError("No media message received from bot")
 
-        file_name = _guess_filename(media_message, options.filename)
-        destination = output_dir / file_name
+        destination = _safe_media_destination(output_dir, media_message, options.filename)
         await _call_with_floodwait(lambda: media_message.download_media(file=destination), logger)
         logger.info('Downloaded to %s', destination)
         return {'file': str(destination)}

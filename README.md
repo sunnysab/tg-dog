@@ -37,6 +37,8 @@ uv run tg-dog --help
 
 - `api_id` / `api_hash`：全局 API 配置（所有账号复用）
 - `proxy`：可选的代理 URL（如 `http://127.0.0.1:8080` 或 `socks5://127.0.0.1:1080`，不支持认证）
+- `daemon_socket`：daemon 的本地 IPC socket 路径（默认 `logs/daemon.sock`）
+- `daemon_token`：可选 daemon 鉴权 token；在共享机器上强烈建议配置
 - `profiles`：多账号配置，每个键为别名，仅需填写手机号
 - `tasks`：定时任务列表，使用 Cron 表达式
 
@@ -46,6 +48,8 @@ uv run tg-dog --help
 api_id: 123456
 api_hash: "shared_api_hash"
 proxy: "http://127.0.0.1:8080"
+daemon_socket: "logs/daemon.sock"
+daemon_token: "replace-with-a-random-long-token"
 
 profiles:
   work_account:
@@ -134,6 +138,7 @@ python main.py daemon --config config.yaml --log-file logs/daemon.log
 
 > 默认情况下，`run/list/plugin` 会优先尝试连接正在运行的 daemon，复用已登录账号。  
 > 如果不想使用 daemon，可加 `--no-daemon`。
+> 为了避免本机其他用户调用 daemon，建议设置 `daemon_token`，并使用随机长字符串。
 
 ## daemon 监听与随机任务示例
 

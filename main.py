@@ -71,6 +71,14 @@ def _daemon_socket(config: dict) -> str:
     return str(config.get('daemon_socket', 'logs/daemon.sock'))
 
 
+def _daemon_token(config: dict) -> Optional[str]:
+    token = config.get('daemon_token')
+    if token is None:
+        return None
+    value = str(token).strip()
+    return value or None
+
+
 def _print_dialog_item(item: dict) -> None:
     name = item.get('name') or ''
     username = item.get('username') or ''
@@ -146,6 +154,7 @@ def _run_action_command(
 ):
     cfg, profile_key, profile_data = _resolve_profile_or_exit(config_path, profile)
     local_ctx = _build_local_context(cfg, profile_key, profile_data, session_dir, logger)
+    daemon_token = _daemon_token(cfg)
 
     try:
         return run_action_with_optional_daemon(
@@ -154,6 +163,7 @@ def _run_action_command(
             payload=payload,
             profile_name=profile,
             socket_path=_daemon_socket(cfg),
+            daemon_token=daemon_token,
             no_daemon=no_daemon,
             logger=logger,
             local_ctx=local_ctx,
@@ -389,7 +399,11 @@ def daemon(
 
     socket_path = socket_path or _daemon_socket(cfg)
     cleanup_stale_socket(socket_path, logger)
-    existing = try_daemon_request(socket_path, {'action': 'ping'}, logger)
+    existing_request = {'action': 'ping'}
+    daemon_token = _daemon_token(cfg)
+    if daemon_token:
+        existing_request['token'] = daemon_token
+    existing = try_daemon_request(socket_path, existing_request, logger)
     if existing and existing.get('ok'):
         logger.error('Daemon already running at %s', socket_path)
         raise typer.Exit(code=1)
