@@ -1,34 +1,34 @@
 # random_daily_sender
 
-Daily sign/check-in sender with a day plan model.
+用于每日签到/打卡消息的随机化调度发送插件（基于日计划模型）。
 
-## Behavior
+## 行为说明
 
-- On the first run each day, it generates a **daily plan** for all known accounts in the state file.
-- The plan contains when each account should send today.
-- Later runs only read state and decide whether to wait, send, retry, or skip.
-- Plan generation respects both:
-  - time window (`--window`)
-  - minimum interval (`--min-interval-hours`)
+- 每天首次运行时，会为状态文件中的所有账号生成当日计划。
+- 计划会记录每个账号“今天应该在何时发送”。
+- 后续运行根据状态决定：等待、发送、重试或跳过。
+- 计划生成同时受以下约束：
+  - 时间窗口（`--window`）
+  - 最小发送间隔（`--min-interval-hours`）
 
-## Arguments
+## 参数说明
 
-- `--target` target username or numeric ID
-- `--text` message to send
-- `--window` daily window, e.g. `09:00-23:00`
-- `--min-interval-hours` minimum interval between successful sends
-- `--expect-text` expected full response text (optional)
-- `--expect-keyword` expected keyword in response (optional)
-- `--expect-timeout` response timeout seconds
-- `--state` state file path (YAML/JSON)
+- `--target`：目标用户名或数字 ID（必填）
+- `--text`：发送文本（必填）
+- `--window`：每日时间窗口，格式如 `09:00-23:00`（默认 `09:00-23:00`）
+- `--min-interval-hours`：两次成功发送的最小间隔小时数（默认 `24`）
+- `--expect-text`：期望的完整回复文本（可选）
+- `--expect-keyword`：期望回复中包含的关键词（可选）
+- `--expect-timeout`：等待回复超时秒数（默认 `10`）
+- `--state`：状态文件路径（支持 YAML/JSON，默认 `data/state.yaml`）
 
-## Retry
+## 重试策略
 
-- Flood wait is always retried automatically.
-- Expectation failure / timeout / send error is retried within the same day window.
-- Retries are limited per day to avoid endless loops.
+- 遇到 FloodWait 会自动等待并重试。
+- 期望校验失败 / 超时 / 发送异常会在当日窗口内继续重试。
+- 每日重试次数有上限，避免无限循环。
 
-## Scheduler recommendation
+## 调度建议
 
 ```yaml
 - trigger_time: "*/5 * * * *"
@@ -38,10 +38,10 @@ Daily sign/check-in sender with a day plan model.
     args: ["--target", "7672228046", "--text", "/sign", "--window", "09:00-23:00", "--min-interval-hours", "24", "--expect-keyword", "成功", "--expect-timeout", "10", "--state", "data/state.yaml"]
 ```
 
-The plugin can wait for a near plan time in-process, so actual send time is no longer strictly snapped to cron ticks.
+插件在计划时间接近时可以进程内等待，因此实际发送时间不再严格对齐 cron 刻度。
 
-## CLI example
+## CLI 示例
 
-```
+```bash
 tg-dog plugin random_daily_sender execute -- --target 7672228046 --text "/sign" --window 09:00-23:00 --state data/state.yaml
 ```
