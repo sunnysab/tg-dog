@@ -19,13 +19,18 @@
 └── pyproject.toml
 ```
 
-## 环境准备（使用 .venv）
+## 环境准备（使用 uv）
 
 ```
-python -m venv .venv
+uv venv
 source .venv/bin/activate
-pip install -U pip
-pip install -e .
+uv pip install -e .
+```
+
+或直接使用：
+
+```
+uv run tg-dog --help
 ```
 
 ## 配置文件说明（config.yaml）
@@ -208,6 +213,14 @@ tasks:
       args: ["foo", "bar"]
       # mode: cli  # 可选：用 Typer 子命令方式执行
 ```
+
+## 架构说明
+
+- `core/action_types.py`：统一 action 别名与合法性校验
+- `core/action_payloads.py`：统一 CLI payload 构建
+- `core/cli_runtime.py`：统一 daemon/local 执行策略
+- `core/executor.py`：action 路由层
+- `core/actions.py`：具体 Telegram 动作实现
 
 ## 设计要点
 

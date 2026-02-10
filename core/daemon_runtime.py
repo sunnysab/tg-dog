@@ -1,12 +1,12 @@
 import asyncio
 import pathlib
-import socket
 from typing import Any, Dict, Optional
 
+from core.action_types import normalize_action_type
 from core.client_manager import ClientManager, safe_disconnect
 from core.config import resolve_profile
 from core.executor import ActionError, execute_action
-from core.ipc import start_server
+from core.ipc import cleanup_stale_socket, start_server
 from core.plugins import PluginError, run_plugin_setup
 from core.scheduler import build_scheduler
 
@@ -77,41 +77,13 @@ class ClientPool:
         self._clients.clear()
         self._locks.clear()
 
-
-def _cleanup_stale_socket(socket_path: str, logger) -> bool:
-    path = pathlib.Path(socket_path)
-    if not path.exists():
-        return False
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        sock.settimeout(1)
-        sock.connect(socket_path)
-    except ConnectionRefusedError:
-        try:
-            path.unlink()
-            logger.warning("Removed stale socket file %s", socket_path)
-        except Exception:
-            logger.warning("Failed to remove stale socket file %s", socket_path)
-        return True
-    except FileNotFoundError:
-        return False
-    except OSError:
-        return False
-    finally:
-        try:
-            sock.close()
-        except Exception:
-            pass
-    return False
-
-
 async def run_daemon(
     config: Dict[str, Any],
     logger,
     socket_path: str,
     session_dir: str = "sessions",
 ) -> None:
-    if _cleanup_stale_socket(socket_path, logger):
+    if cleanup_stale_socket(socket_path, logger):
         logger.info("Stale socket cleaned before daemon start")
     pool = ClientPool(config, session_dir, logger)
     stop_event = asyncio.Event()
@@ -151,7 +123,7 @@ async def run_daemon(
                 logger.exception("Listener %s failed: %s", index, exc)
 
     async def _handle(request: Dict[str, Any]) -> Dict[str, Any]:
-        action = request.get("action")
+        action = normalize_action_type(request.get('action'))
         if action == "ping":
             return {"ok": True}
         if action == "shutdown":

@@ -1,12 +1,40 @@
 import asyncio
 import json
 import pathlib
+import socket
 import struct
 from typing import Any, Awaitable, Callable, Dict
 
 
 class IpcError(RuntimeError):
     pass
+
+
+def cleanup_stale_socket(socket_path: str, logger) -> bool:
+    path = pathlib.Path(socket_path)
+    if not path.exists():
+        return False
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(1)
+        sock.connect(socket_path)
+    except ConnectionRefusedError:
+        try:
+            path.unlink()
+            logger.warning('Removed stale socket file %s', socket_path)
+        except Exception:
+            logger.warning('Failed to remove stale socket file %s', socket_path)
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return False
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+    return False
 
 
 def _ensure_parent(path: pathlib.Path) -> None:

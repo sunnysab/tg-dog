@@ -4,22 +4,10 @@ from typing import Any, Dict
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from core.action_types import is_supported_action, normalize_action_type
 from core.client_manager import ClientManager, safe_disconnect
 from core.config import resolve_profile
 from core.executor import ActionError, execute_action
-
-
-action_map = {
-    "send_msg",
-    "send",
-    "interactive_send",
-    "download",
-    "list",
-    "list_dialogs",
-    "export",
-    "plugin",
-    "plugin_cli",
-}
 
 
 async def _run_task(task: Dict[str, Any], config: Dict[str, Any], logger, pool=None) -> None:
@@ -27,10 +15,11 @@ async def _run_task(task: Dict[str, Any], config: Dict[str, Any], logger, pool=N
         logger.info("Task disabled; skipping")
         return
     profile_name = task.get("profile")
-    action_type = task.get("action_type")
-    if action_type not in action_map:
-        logger.error("Unknown action_type '%s'", action_type)
+    raw_action_type = task.get('action_type')
+    if not is_supported_action(raw_action_type):
+        logger.error("Unknown action_type '%s'", raw_action_type)
         return
+    action_type = normalize_action_type(raw_action_type)
     payload = task.get("payload") or {}
     target = task.get("target")
     mode = payload.get("mode", "code")

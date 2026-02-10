@@ -1,6 +1,7 @@
 import json
 from typing import Any, Dict, List, Optional
 
+from core.action_types import normalize_action_type
 from core.actions import download_media, export_messages, interactive_send, list_dialogs, list_messages, send_message
 from core.plugins import run_plugin_cli, run_plugin_code
 
@@ -33,8 +34,8 @@ async def execute_action(
     loop=None,
     session_dir: str = "sessions",
 ) -> Dict[str, Any]:
-    action_type = (action_type or "").lower()
-    if action_type in {"send_msg", "send"}:
+    action_type = normalize_action_type(action_type)
+    if action_type == "send":
         if not target:
             raise ActionError("Missing target")
         text = payload.get("text") or payload.get("message")
@@ -75,7 +76,7 @@ async def execute_action(
             mark_read=bool(payload.get("mark_read")),
         )
         return {"messages": messages}
-    if action_type in {"list_dialogs", "dialogs"}:
+    if action_type == "list_dialogs":
         dialogs = await list_dialogs(client, int(payload.get("limit", 30)), logger)
         return {"dialogs": dialogs}
     if action_type == "export":

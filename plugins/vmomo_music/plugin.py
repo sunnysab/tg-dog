@@ -49,19 +49,6 @@ def _collect_buttons(message):
     return buttons
 
 
-def _select_button(buttons: list[dict], choice: int, keyword: str | None):
-    if not buttons:
-        return None
-    if keyword:
-        for btn in buttons:
-            if keyword in btn.get("text", ""):
-                return btn
-    index = max(choice, 1) - 1
-    if index >= len(buttons):
-        return buttons[0]
-    return buttons[index]
-
-
 def _find_next_button(buttons: list[dict]):
     keywords = ("下一页", "下页", "next", "more", ">", "»", "→", "➡")
     for btn in buttons:
