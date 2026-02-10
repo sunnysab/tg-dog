@@ -22,28 +22,41 @@ class ClientPool:
         self.logger = logger
         self._clients: Dict[str, ClientManager] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
+        self._ensure_locks: Dict[str, asyncio.Lock] = {}
 
     async def _ensure_client(self, profile_name: Optional[str]):
         profile_key, profile = resolve_profile(self.config, profile_name)
-        manager = self._clients.get(profile_key)
-        if manager is None:
-            manager = ClientManager(
-                api_id=int(profile["api_id"]),
-                api_hash=profile["api_hash"],
-                phone_number=profile["phone_number"],
-                session_dir=self.session_dir,
-                proxy_url=profile.get("proxy"),
-            )
-            await manager.connect(profile_key)
-            authorized = await manager.ensure_authorized(interactive=False)
-            if not authorized:
-                raise DaemonError(f"Profile '{profile_key}' is not authorized")
-            self._clients[profile_key] = manager
-            self._locks[profile_key] = asyncio.Lock()
-        else:
-            if not manager.client.is_connected():
-                await manager.client.connect()
-        return manager, profile_key, profile, self._locks[profile_key]
+        ensure_lock = self._ensure_locks.setdefault(profile_key, asyncio.Lock())
+        async with ensure_lock:
+            manager = self._clients.get(profile_key)
+            if manager is None:
+                manager = ClientManager(
+                    api_id=int(profile["api_id"]),
+                    api_hash=profile["api_hash"],
+                    phone_number=profile["phone_number"],
+                    session_dir=self.session_dir,
+                    proxy_url=profile.get("proxy"),
+                )
+                try:
+                    await manager.connect(profile_key)
+                    authorized = await manager.ensure_authorized(interactive=False)
+                    if not authorized:
+                        raise DaemonError(f"Profile '{profile_key}' is not authorized")
+                except Exception:
+                    await safe_disconnect(manager)
+                    raise
+                self._clients[profile_key] = manager
+                self._locks[profile_key] = asyncio.Lock()
+            else:
+                if not manager.client.is_connected():
+                    await manager.client.connect()
+
+            lock = self._locks.get(profile_key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._locks[profile_key] = lock
+
+            return manager, profile_key, profile, lock
 
     async def run_action(
         self,
@@ -76,6 +89,7 @@ class ClientPool:
             await safe_disconnect(manager)
         self._clients.clear()
         self._locks.clear()
+        self._ensure_locks.clear()
 
 async def run_daemon(
     config: Dict[str, Any],
