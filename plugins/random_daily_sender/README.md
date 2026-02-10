@@ -1,20 +1,34 @@
 # random_daily_sender
 
-每天在指定时间窗口内随机发送消息。支持 24 小时间隔约束与状态持久化。
-时间计算使用操作系统本地时区。
+Daily sign/check-in sender with a day plan model.
 
-## 参数
+## Behavior
 
-- `--target` 目标（用户名或数字 ID）
-- `--text` 发送内容
-- `--window` 随机时间窗口，例如 `09:00-23:00`
-- `--min-interval-hours` 最小间隔小时数，默认 24
-- `--expect-text` 期望回复的完整文本（可选）
-- `--expect-keyword` 期望回复包含的关键词（可选）
-- `--expect-timeout` 等待回复超时（秒）
+- On the first run each day, it generates a **daily plan** for all known accounts in the state file.
+- The plan contains when each account should send today.
+- Later runs only read state and decide whether to wait, send, retry, or skip.
+- Plan generation respects both:
+  - time window (`--window`)
+  - minimum interval (`--min-interval-hours`)
+
+## Arguments
+
+- `--target` target username or numeric ID
+- `--text` message to send
+- `--window` daily window, e.g. `09:00-23:00`
+- `--min-interval-hours` minimum interval between successful sends
+- `--expect-text` expected full response text (optional)
+- `--expect-keyword` expected keyword in response (optional)
+- `--expect-timeout` response timeout seconds
 - `--state` state file path (YAML/JSON)
 
-## 作为任务使用（推荐）
+## Retry
+
+- Flood wait is always retried automatically.
+- Expectation failure / timeout / send error is retried within the same day window.
+- Retries are limited per day to avoid endless loops.
+
+## Scheduler recommendation
 
 ```yaml
 - trigger_time: "*/5 * * * *"
@@ -24,10 +38,10 @@
     args: ["--target", "7672228046", "--text", "/sign", "--window", "09:00-23:00", "--min-interval-hours", "24", "--expect-keyword", "成功", "--expect-timeout", "10", "--state", "data/state.yaml"]
 ```
 
-建议每 3-10 分钟运行一次，以便命中随机时间点。
+The plugin can wait for a near plan time in-process, so actual send time is no longer strictly snapped to cron ticks.
 
-## CLI 手动执行
+## CLI example
 
 ```
-tg-dog plugin random_daily_sender execute -- --target 7672228046 --text "/sign" --window 09:00-23:00
+tg-dog plugin random_daily_sender execute -- --target 7672228046 --text "/sign" --window 09:00-23:00 --state data/state.yaml
 ```
