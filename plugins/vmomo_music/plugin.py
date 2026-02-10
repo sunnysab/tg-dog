@@ -1,14 +1,38 @@
 import argparse
 import asyncio
+from dataclasses import dataclass
 import mimetypes
 import pathlib
 
 import click
 import typer
-from telethon.errors import FloodWaitError
 from telethon import events
+from telethon.errors import FloodWaitError
 
-app = typer.Typer(help="搜索 VmomoVBot 并下载歌曲")
+
+DEFAULT_TARGET = '@VmomoVBot'
+DEFAULT_CHOICE = 1
+DEFAULT_TIMEOUT = 15
+DEFAULT_MAX_WAIT = 5
+DEFAULT_MAX_PAGES = 5
+DEFAULT_OUTPUT = 'downloads/vmomo'
+
+
+@dataclass(slots=True)
+class SearchOptions:
+    query: str
+    target: str = DEFAULT_TARGET
+    choice: int = DEFAULT_CHOICE
+    keyword: str | None = None
+    timeout: int = DEFAULT_TIMEOUT
+    max_wait: int = DEFAULT_MAX_WAIT
+    max_pages: int = DEFAULT_MAX_PAGES
+    list_only: bool = False
+    output: str = DEFAULT_OUTPUT
+    filename: str | None = None
+
+
+app = typer.Typer(help='Search @VmomoVBot and download media')
 
 
 @app.callback()
@@ -18,17 +42,32 @@ def _callback():
 
 def _parse_args(args: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--query", required=True)
-    parser.add_argument("--target", default="@VmomoVBot")
-    parser.add_argument("--choice", type=int, default=1)
-    parser.add_argument("--keyword")
-    parser.add_argument("--timeout", type=int, default=15)
-    parser.add_argument("--max-wait", type=int, default=5)
-    parser.add_argument("--max-pages", type=int, default=5)
-    parser.add_argument("--list-only", action="store_true")
-    parser.add_argument("--output", default="downloads/vmomo")
-    parser.add_argument("--filename")
+    parser.add_argument('--query', required=True)
+    parser.add_argument('--target', default=DEFAULT_TARGET)
+    parser.add_argument('--choice', type=int, default=DEFAULT_CHOICE)
+    parser.add_argument('--keyword')
+    parser.add_argument('--timeout', type=int, default=DEFAULT_TIMEOUT)
+    parser.add_argument('--max-wait', type=int, default=DEFAULT_MAX_WAIT)
+    parser.add_argument('--max-pages', type=int, default=DEFAULT_MAX_PAGES)
+    parser.add_argument('--list-only', action='store_true')
+    parser.add_argument('--output', default=DEFAULT_OUTPUT)
+    parser.add_argument('--filename')
     return parser.parse_args(args)
+
+
+def _options_from_namespace(options: argparse.Namespace) -> SearchOptions:
+    return SearchOptions(
+        query=options.query,
+        target=options.target,
+        choice=options.choice,
+        keyword=options.keyword,
+        timeout=options.timeout,
+        max_wait=options.max_wait,
+        max_pages=options.max_pages,
+        list_only=options.list_only,
+        output=options.output,
+        filename=options.filename,
+    )
 
 
 def _normalize_target(target: str):
@@ -117,31 +156,22 @@ async def _wait_for_page_update(conv, target_entity, last_message_id: int, timeo
 
 async def _search_and_download(
     context,
-    query: str,
-    target: str,
-    choice: int,
-    keyword: str | None,
-    timeout: int,
-    max_wait: int,
-    max_pages: int,
-    list_only: bool,
-    output: str,
-    filename: str | None,
+    options: SearchOptions,
 ):
-    logger = context["logger"]
-    client = context["client"]
-    target_entity = _normalize_target(target)
+    logger = context['logger']
+    client = context['client']
+    target_entity = _normalize_target(options.target)
 
-    output_dir = pathlib.Path(output)
+    output_dir = pathlib.Path(options.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    async with client.conversation(target_entity, timeout=timeout) as conv:
-        await _call_with_floodwait(lambda: conv.send_message(query), logger)
-        response = await _call_with_floodwait(lambda: conv.get_response(timeout=timeout), logger)
+    async with client.conversation(target_entity, timeout=options.timeout) as conv:
+        await _call_with_floodwait(lambda: conv.send_message(options.query), logger)
+        response = await _call_with_floodwait(lambda: conv.get_response(timeout=options.timeout), logger)
         await _mark_read(client, target_entity, response, logger)
 
         page = 1
-        remaining_choice = max(choice, 1)
+        remaining_choice = max(options.choice, 1)
         all_candidates = []
 
         while True:
@@ -154,15 +184,15 @@ async def _search_and_download(
             for index, btn in enumerate(buttons, start=1):
                 logger.info("  [%s] %s", index, btn.get("text"))
 
-            if list_only:
+            if options.list_only:
                 next_btn = _find_next_button(buttons)
-                if next_btn and page < max_pages:
+                if next_btn and page < options.max_pages:
                     await _call_with_floodwait(
-                        lambda: response.click(i=next_btn["i"], j=next_btn["j"]),
+                        lambda: response.click(i=next_btn['i'], j=next_btn['j']),
                         logger,
                     )
                     response = await _call_with_floodwait(
-                        lambda: _wait_for_page_update(conv, target_entity, response.id, timeout),
+                        lambda: _wait_for_page_update(conv, target_entity, response.id, options.timeout),
                         logger,
                     )
                     await _mark_read(client, target_entity, response, logger)
@@ -171,9 +201,9 @@ async def _search_and_download(
                 return {"candidates": [btn.get("text") for btn in all_candidates]}
 
             selected = None
-            if keyword:
+            if options.keyword:
                 for btn in buttons:
-                    if keyword in (btn.get("text") or ""):
+                    if options.keyword in (btn.get('text') or ''):
                         selected = btn
                         break
             else:
@@ -184,28 +214,28 @@ async def _search_and_download(
 
             if selected:
                 await _call_with_floodwait(
-                    lambda: response.click(i=selected["i"], j=selected["j"]),
+                    lambda: response.click(i=selected['i'], j=selected['j']),
                     logger,
                 )
                 break
 
             next_btn = _find_next_button(buttons)
-            if not next_btn or page >= max_pages:
-                raise RuntimeError("No matching candidate found")
+            if not next_btn or page >= options.max_pages:
+                raise RuntimeError('No matching candidate found')
             await _call_with_floodwait(
-                lambda: response.click(i=next_btn["i"], j=next_btn["j"]),
+                lambda: response.click(i=next_btn['i'], j=next_btn['j']),
                 logger,
             )
             response = await _call_with_floodwait(
-                lambda: _wait_for_page_update(conv, target_entity, response.id, timeout),
+                lambda: _wait_for_page_update(conv, target_entity, response.id, options.timeout),
                 logger,
             )
             await _mark_read(client, target_entity, response, logger)
             page += 1
 
         media_message = None
-        for _ in range(max_wait):
-            message = await _call_with_floodwait(lambda: conv.get_response(timeout=timeout), logger)
+        for _ in range(options.max_wait):
+            message = await _call_with_floodwait(lambda: conv.get_response(timeout=options.timeout), logger)
             await _mark_read(client, target_entity, message, logger)
             if message.media or message.file:
                 media_message = message
@@ -213,60 +243,51 @@ async def _search_and_download(
         if not media_message:
             raise RuntimeError("No media message received from bot")
 
-        file_name = _guess_filename(media_message, filename)
+        file_name = _guess_filename(media_message, options.filename)
         destination = output_dir / file_name
         await _call_with_floodwait(lambda: media_message.download_media(file=destination), logger)
-        logger.info("Downloaded to %s", destination)
-        return {"file": str(destination)}
+        logger.info('Downloaded to %s', destination)
+        return {'file': str(destination)}
+
+
+async def _run_with_options(context, options: SearchOptions):
+    return await _search_and_download(context, options)
 
 
 async def run(context, args):
-    options = _parse_args(args)
-    return await _search_and_download(
-        context,
-        query=options.query,
-        target=options.target,
-        choice=options.choice,
-        keyword=options.keyword,
-        timeout=options.timeout,
-        max_wait=options.max_wait,
-        max_pages=options.max_pages,
-        list_only=options.list_only,
-        output=options.output,
-        filename=options.filename,
-    )
+    parsed = _parse_args(args)
+    options = _options_from_namespace(parsed)
+    return await _run_with_options(context, options)
 
 
 @app.command()
 def search(
-    query: str = typer.Option(..., "--query"),
-    target: str = typer.Option("@VmomoVBot", "--target"),
-    choice: int = typer.Option(1, "--choice"),
-    keyword: str = typer.Option(None, "--keyword"),
-    timeout: int = typer.Option(15, "--timeout"),
-    max_wait: int = typer.Option(5, "--max-wait"),
-    max_pages: int = typer.Option(5, "--max-pages"),
-    list_only: bool = typer.Option(False, "--list-only"),
-    output: str = typer.Option("downloads/vmomo", "--output"),
-    filename: str = typer.Option(None, "--filename"),
+    query: str = typer.Option(..., '--query'),
+    target: str = typer.Option(DEFAULT_TARGET, '--target'),
+    choice: int = typer.Option(DEFAULT_CHOICE, '--choice'),
+    keyword: str | None = typer.Option(None, '--keyword'),
+    timeout: int = typer.Option(DEFAULT_TIMEOUT, '--timeout'),
+    max_wait: int = typer.Option(DEFAULT_MAX_WAIT, '--max-wait'),
+    max_pages: int = typer.Option(DEFAULT_MAX_PAGES, '--max-pages'),
+    list_only: bool = typer.Option(False, '--list-only'),
+    output: str = typer.Option(DEFAULT_OUTPUT, '--output'),
+    filename: str | None = typer.Option(None, '--filename'),
 ):
     ctx = click.get_current_context()
     context = ctx.obj or {}
-    call = context.get("call")
+    call = context.get('call')
     if call is None:
-        raise RuntimeError("context.call is required for CLI mode")
-    call(
-        _search_and_download(
-            context,
-            query=query,
-            target=target,
-            choice=choice,
-            keyword=keyword,
-            timeout=timeout,
-            max_wait=max_wait,
-            max_pages=max_pages,
-            list_only=list_only,
-            output=output,
-            filename=filename,
-        )
+        raise RuntimeError('context.call is required for CLI mode')
+    options = SearchOptions(
+        query=query,
+        target=target,
+        choice=choice,
+        keyword=keyword,
+        timeout=timeout,
+        max_wait=max_wait,
+        max_pages=max_pages,
+        list_only=list_only,
+        output=output,
+        filename=filename,
     )
+    call(_run_with_options(context, options))

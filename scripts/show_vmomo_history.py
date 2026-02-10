@@ -6,8 +6,8 @@ from core.client_manager import ClientManager, safe_disconnect
 from core.config import load_config, resolve_profile
 
 
-async def main(profile: str, limit: int):
-    config = load_config("config.yaml")
+async def main(profile: str | None, limit: int, config_path: str):
+    config = load_config(config_path)
     profile_key, profile = resolve_profile(config, profile)
     manager = ClientManager(
         api_id=int(profile["api_id"]),
@@ -46,7 +46,8 @@ class _PrintLogger:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--profile", default="work_account")
+    parser.add_argument("--profile", default=None)
     parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument("--config", default="config.yaml")
     options = parser.parse_args()
-    asyncio.run(main(options.profile, options.limit))
+    asyncio.run(main(options.profile, options.limit, options.config))

@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+from dataclasses import dataclass
 import hashlib
 import json
 import pathlib
@@ -27,6 +28,23 @@ app = typer.Typer(help='Randomized daily sender with planning')
 MAX_INLINE_WAIT_SECONDS = 300
 MAX_RETRIES_PER_DAY = 3
 RETRY_MIN_DELAY_SECONDS = 120
+
+DEFAULT_WINDOW = '09:00-23:00'
+DEFAULT_MIN_INTERVAL_HOURS = 24
+DEFAULT_EXPECT_TIMEOUT = 10
+DEFAULT_STATE_PATH = 'data/state.yaml'
+
+
+@dataclass(slots=True)
+class SenderOptions:
+    target: str
+    text: str
+    window: str = DEFAULT_WINDOW
+    min_interval_hours: int = DEFAULT_MIN_INTERVAL_HOURS
+    expect_text: str | None = None
+    expect_keyword: str | None = None
+    expect_timeout: int = DEFAULT_EXPECT_TIMEOUT
+    state: str = DEFAULT_STATE_PATH
 
 
 def _parse_window(value: str) -> tuple[time, time]:
@@ -112,13 +130,26 @@ def _parse_args(args: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('--target', required=True)
     parser.add_argument('--text', required=True)
-    parser.add_argument('--window', default='09:00-23:00')
-    parser.add_argument('--min-interval-hours', type=int, default=24)
+    parser.add_argument('--window', default=DEFAULT_WINDOW)
+    parser.add_argument('--min-interval-hours', type=int, default=DEFAULT_MIN_INTERVAL_HOURS)
     parser.add_argument('--expect-text')
     parser.add_argument('--expect-keyword')
-    parser.add_argument('--expect-timeout', type=int, default=10)
-    parser.add_argument('--state', default='data/state.yaml')
+    parser.add_argument('--expect-timeout', type=int, default=DEFAULT_EXPECT_TIMEOUT)
+    parser.add_argument('--state', default=DEFAULT_STATE_PATH)
     return parser.parse_args(args)
+
+
+def _options_from_namespace(options: argparse.Namespace) -> SenderOptions:
+    return SenderOptions(
+        target=options.target,
+        text=options.text,
+        window=options.window,
+        min_interval_hours=options.min_interval_hours,
+        expect_text=options.expect_text,
+        expect_keyword=options.expect_keyword,
+        expect_timeout=options.expect_timeout,
+        state=options.state,
+    )
 
 
 def _normalize_target(target: str):
@@ -452,14 +483,13 @@ async def _run(context, target: str, text: str, window: str, min_interval_hours:
         }
 
 
-async def run(context, args):
-    options = _parse_args(args)
-    context = dict(context)
-    context['expect_text'] = options.expect_text
-    context['expect_keyword'] = options.expect_keyword
-    context['expect_timeout'] = options.expect_timeout
+async def _run_with_options(context: dict, options: SenderOptions):
+    normalized_context = dict(context)
+    normalized_context['expect_text'] = options.expect_text
+    normalized_context['expect_keyword'] = options.expect_keyword
+    normalized_context['expect_timeout'] = options.expect_timeout
     return await _run(
-        context,
+        normalized_context,
         target=options.target,
         text=options.text,
         window=options.window,
@@ -468,33 +498,36 @@ async def run(context, args):
     )
 
 
+async def run(context, args):
+    parsed = _parse_args(args)
+    options = _options_from_namespace(parsed)
+    return await _run_with_options(context, options)
+
+
 @app.command()
 def execute(
     target: str = typer.Option(..., '--target'),
     text: str = typer.Option(..., '--text'),
-    window: str = typer.Option('09:00-23:00', '--window'),
-    min_interval_hours: int = typer.Option(24, '--min-interval-hours'),
+    window: str = typer.Option(DEFAULT_WINDOW, '--window'),
+    min_interval_hours: int = typer.Option(DEFAULT_MIN_INTERVAL_HOURS, '--min-interval-hours'),
     expect_text: str = typer.Option(None, '--expect-text'),
     expect_keyword: str = typer.Option(None, '--expect-keyword'),
-    expect_timeout: int = typer.Option(10, '--expect-timeout'),
-    state: str = typer.Option('data/state.yaml', '--state'),
+    expect_timeout: int = typer.Option(DEFAULT_EXPECT_TIMEOUT, '--expect-timeout'),
+    state: str = typer.Option(DEFAULT_STATE_PATH, '--state'),
 ):
     ctx = click.get_current_context()
     context = ctx.obj or {}
     call = context.get('call')
     if call is None:
         raise RuntimeError('context.call is required for CLI mode')
-    context = dict(context)
-    context['expect_text'] = expect_text
-    context['expect_keyword'] = expect_keyword
-    context['expect_timeout'] = expect_timeout
-    call(
-        _run(
-            context,
-            target=target,
-            text=text,
-            window=window,
-            min_interval_hours=min_interval_hours,
-            state_path=state,
-        )
+    options = SenderOptions(
+        target=target,
+        text=text,
+        window=window,
+        min_interval_hours=min_interval_hours,
+        expect_text=expect_text,
+        expect_keyword=expect_keyword,
+        expect_timeout=expect_timeout,
+        state=state,
     )
+    call(_run_with_options(context, options))
