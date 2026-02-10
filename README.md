@@ -162,11 +162,13 @@ listeners:
 
 已提供服务文件：`systemd/tg-dog.service`。
 
+默认假设仓库路径为 `~/tg-dog`（即 `%h/tg-dog`）。如果你的实际路径不同，请先修改服务文件中的 `WorkingDirectory`、`ExecStart`、`ExecStartPre`。
+
 安装并启动：
 
 ```
 mkdir -p ~/.config/systemd/user
-cp /home/sunnysab/Code/tg-dog/systemd/tg-dog.service ~/.config/systemd/user/tg-dog.service
+cp ~/tg-dog/systemd/tg-dog.service ~/.config/systemd/user/tg-dog.service
 systemctl --user daemon-reload
 systemctl --user enable --now tg-dog
 ```

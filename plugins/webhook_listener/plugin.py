@@ -12,6 +12,8 @@ def _parse_args(args: list[str]) -> argparse.Namespace:
     parser.add_argument("--url", required=True)
     parser.add_argument("--method", default="POST")
     parser.add_argument("--timeout", type=int, default=10)
+    parser.add_argument("--retry", type=int, default=2)
+    parser.add_argument("--retry-delay", type=float, default=1.0)
     parser.add_argument("--header", action="append", default=[])
     return parser.parse_args(args)
 
@@ -46,6 +48,8 @@ async def setup(context, args):
     options = _parse_args(args)
     headers = _headers_from_args(options.header)
     target = _normalize_target(options.target)
+    retry = max(int(options.retry), 0)
+    retry_delay = max(float(options.retry_delay), 0.1)
 
     try:
         entity = await client.get_input_entity(target)
@@ -61,14 +65,36 @@ async def setup(context, args):
             "date": event.date.isoformat() if event.date else None,
             "sender_id": event.sender_id,
         }
-        await asyncio.to_thread(
-            _post,
-            options.url,
-            options.method,
-            payload,
-            headers,
-            options.timeout,
-        )
+        for attempt in range(retry + 1):
+            try:
+                await asyncio.to_thread(
+                    _post,
+                    options.url,
+                    options.method,
+                    payload,
+                    headers,
+                    options.timeout,
+                )
+                return
+            except Exception as exc:
+                is_last = attempt >= retry
+                if is_last:
+                    logger.error('Webhook delivery failed after retries: %s', exc)
+                    return
+                wait_seconds = retry_delay * (2 ** attempt)
+                logger.warning(
+                    'Webhook delivery failed (attempt %s/%s), retry in %.1fs: %s',
+                    attempt + 1,
+                    retry + 1,
+                    wait_seconds,
+                    exc,
+                )
+                await asyncio.sleep(wait_seconds)
 
     client.add_event_handler(_handle, events.NewMessage(chats=entity))
-    logger.info("Webhook listener registered for %s", options.target)
+    logger.info(
+        'Webhook listener registered for %s (retry=%s, retry_delay=%.1fs)',
+        options.target,
+        retry,
+        retry_delay,
+    )

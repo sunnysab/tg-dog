@@ -8,6 +8,8 @@
 - `--url` webhook 地址
 - `--method` HTTP 方法（默认 POST）
 - `--timeout` 超时时间（秒）
+- `--retry` 失败重试次数（默认 2）
+- `--retry-delay` 初始重试间隔秒数（默认 1.0，指数退避）
 - `--header` 额外 HTTP 头（可重复，格式 `Key: Value`）
 
 ## 配置示例（daemon listeners）

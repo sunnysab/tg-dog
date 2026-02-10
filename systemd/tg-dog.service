@@ -5,9 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/sunnysab/Code/tg-dog
-ExecStart=/home/sunnysab/Code/tg-dog/.venv/bin/tg-dog daemon --config /home/sunnysab/Code/tg-dog/config.yaml --log-file /home/sunnysab/Code/tg-dog/logs/daemon.log
-ExecStartPre=/usr/bin/mkdir -p /home/sunnysab/Code/tg-dog/logs /home/sunnysab/Code/tg-dog/data /home/sunnysab/Code/tg-dog/downloads /home/sunnysab/Code/tg-dog/sessions
+WorkingDirectory=%h/tg-dog
+Environment=APP_DIR=%h/tg-dog
+ExecStart=%h/tg-dog/.venv/bin/tg-dog daemon --config %h/tg-dog/config.yaml --log-file %h/tg-dog/logs/daemon.log
+ExecStartPre=/usr/bin/mkdir -p %h/tg-dog/logs %h/tg-dog/data %h/tg-dog/downloads %h/tg-dog/sessions
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
