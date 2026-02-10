@@ -202,6 +202,13 @@ tg-dog plugin echo -- foo bar
 tg-dog list-plugins
 ```
 
+查看插件子命令帮助（无需真正执行插件逻辑）：
+
+```
+tg-dog plugin-help vmomo_music
+tg-dog plugin-help random_daily_sender
+```
+
 定时任务调用插件（示例）：
 
 ```yaml

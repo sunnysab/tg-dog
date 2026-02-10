@@ -23,6 +23,7 @@ from core.executor import ActionError
 from core.ipc import cleanup_stale_socket
 from core.plugins import (
     PluginError,
+    get_plugin_cli_help,
     is_plugin_enabled,
     list_plugin_states,
     list_plugins,
@@ -451,6 +452,19 @@ def list_plugins_cmd():
     """List available plugins."""
     for name in list_plugins():
         typer.echo(name)
+
+
+@app.command(name='plugin-help')
+def plugin_help_cmd(
+    name: str = typer.Argument(..., help='Plugin name under plugins/'),
+):
+    """Show plugin subcommand help without running it."""
+    try:
+        help_text = get_plugin_cli_help(name)
+        typer.echo(help_text)
+    except PluginError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
 
 
 @app.command(name='list-dialogs')

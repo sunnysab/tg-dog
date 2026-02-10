@@ -6,6 +6,7 @@ import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 import typer
+from click.testing import CliRunner
 from typer.main import get_command
 
 
@@ -117,6 +118,37 @@ def _get_plugin_runner(module):
 
 def _get_plugin_setup(module):
     return getattr(module, "setup", None)
+
+
+def get_plugin_cli_help(name: str) -> str:
+    module = load_plugin(name)
+    app = _get_plugin_app(module)
+    if app is None:
+        hooks = []
+        if _get_plugin_runner(module) is not None:
+            hooks.append('run/main')
+        if _get_plugin_setup(module) is not None:
+            hooks.append('setup')
+        hooks_text = ', '.join(hooks) if hooks else 'none'
+        return (
+            f"Plugin '{name}' does not expose a Typer CLI.\n"
+            f'Available hooks: {hooks_text}'
+        )
+
+    command = get_command(app)
+    runner = CliRunner()
+    result = runner.invoke(
+        command,
+        ['--help'],
+        prog_name=f'tg-dog plugin {name}',
+        color=False,
+    )
+    if result.exit_code != 0:
+        raise PluginError(f"Failed to render help for plugin '{name}'")
+    output = (result.output or '').strip()
+    if not output:
+        raise PluginError(f"Plugin '{name}' help is empty")
+    return output
 
 
 def _call_helper(loop: Optional[asyncio.AbstractEventLoop]):
